@@ -1,0 +1,10 @@
+/vendor
+composer.phar
+composer.lock
+/*.md
+!LICENSE.md
+!README.md
+!CONTRIBUTING.md
+.*/*
+*.bak
+*.tmp
