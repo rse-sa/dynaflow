@@ -7,16 +7,16 @@ A powerful, flexible, and **completely action-agnostic** workflow management pac
 
 ## Features
 
-✅ **Universal Actions** - Support for ANY action (not just CRUD)
-✅ **Hook-Based Execution** - Define what happens when workflows complete or are rejected
-✅ **Controller Integration** - Simple trait for seamless integration
-✅ **Flexible Topics** - Use model classes or custom topics
-✅ **Exception System** - Allow specific users to bypass workflows
-✅ **Step Authorization** - Control who can approve each step
-✅ **Audit Trail** - Complete execution history with duration tracking
-✅ **Events** - Laravel events for workflow lifecycle
-✅ **Multilingual** - Translatable workflow and step names
-✅ **Polymorphic** - Works with any Eloquent model
+- ✅ **Universal Actions** - Support for ANY action (not just CRUD)
+- ✅ **Hook-Based Execution** - Define what happens when workflows complete or are rejected
+- ✅ **Controller Integration** - Simple trait for seamless integration
+- ✅ **Flexible Topics** - Use model classes or custom topics
+- ✅ **Exception System** - Allow specific users to bypass workflows
+- ✅ **Step Authorization** - Control who can approve each step
+- ✅ **Audit Trail** - Complete execution history with duration tracking
+- ✅ **Events** - Laravel events for workflow lifecycle
+- ✅ **Multilingual** - Translatable workflow and step names
+- ✅ **Polymorphic** - Works with any Eloquent model
 
 ## Quick Start
 
@@ -443,7 +443,7 @@ return [
 ## Testing
 
 ```bash
-vendor/bin/phpunit
+composer test
 ```
 
 ## Documentation
@@ -452,7 +452,6 @@ vendor/bin/phpunit
 - **[INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)** - Complete integration guide
 - **[HOOK_REGISTRATION.md](docs/HOOK_REGISTRATION.md)** - Hook examples and patterns
 - **[ExampleController.php](docs/ExampleController.php)** - Working controller example
-- **[CLAUDE.md](CLAUDE.md)** - Architecture and system overview
 
 ## Requirements
 

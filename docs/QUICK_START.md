@@ -336,7 +336,6 @@ async function updatePost(postId, data) {
 - **Full Integration Guide**: See `docs/INTEGRATION_GUIDE.md`
 - **Hook Registration**: See `docs/HOOK_REGISTRATION.md` for comprehensive hook examples
 - **Example Controller**: See `docs/ExampleController.php`
-- **Architecture Details**: See `CLAUDE.md`
 
 ## Common Use Cases
 
@@ -404,4 +403,3 @@ For issues or questions:
 - Check the full documentation in `docs/INTEGRATION_GUIDE.md`
 - Review hook examples in `docs/HOOK_REGISTRATION.md`
 - See the complete controller example in `docs/ExampleController.php`
-- Read architecture details in `CLAUDE.md`
