@@ -37,6 +37,18 @@ class DynaflowEngine
             return $this->applyDirectly($topic, $action, $model, $data, $user);
         }
 
+        // Check field-based filtering (monitored_fields / ignored_fields)
+        if ($model && $model->exists && $action === 'update') {
+            if (! $this->shouldTriggerBasedOnFields($workflow, $model, $data)) {
+                return $this->applyDirectly($topic, $action, $model, $data, $user);
+            }
+        }
+
+        // Run beforeTrigger hooks - can skip workflow by returning false
+        if (! $this->hookManager->runBeforeTriggerHooks($workflow, $model, $data, $user)) {
+            return $this->applyDirectly($topic, $action, $model, $data, $user);
+        }
+
         return DB::transaction(function () use ($workflow, $model, $data, $user) {
             // Check for duplicates only if model exists
             if ($model && $model->exists) {
@@ -159,6 +171,22 @@ class DynaflowEngine
         ]);
 
         event(new DynaflowCompleted($instance));
+    }
+
+    /**
+     * Check if workflow should be triggered based on field filtering rules.
+     *
+     * @param  Dynaflow  $workflow
+     * @param  Model  $model
+     * @param  array  $data
+     * @return bool
+     */
+    protected function shouldTriggerBasedOnFields(Dynaflow $workflow, Model $model, array $data): bool
+    {
+        // Get original data from model
+        $originalData = $model->only(array_keys($data));
+
+        return $workflow->shouldTriggerForFields($originalData, $data);
     }
 
     /**

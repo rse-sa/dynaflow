@@ -1,4 +1,4 @@
-# Dynaflow - Universal Workflow Management for Laravel
+# Dynaflow - Dynamic Workflow Management for Laravel
 
 [![Latest Version](https://img.shields.io/packagist/v/rse-sa/dynaflow.svg)](https://packagist.org/packages/rse-sa/dynaflow)
 [![License](https://img.shields.io/packagist/l/rse-sa/dynaflow.svg)](https://packagist.org/packages/rse-sa/dynaflow)
@@ -9,6 +9,8 @@ A powerful, flexible, and **completely action-agnostic** workflow management pac
 
 - ✅ **Universal Actions** - Support for ANY action (not just CRUD)
 - ✅ **Hook-Based Execution** - Define what happens when workflows complete or are rejected
+- ✅ **Field Filtering** - Skip workflows when only non-important fields change
+- ✅ **Conditional Triggers** - Use hooks to dynamically decide when to skip workflows
 - ✅ **Controller Integration** - Simple trait for seamless integration
 - ✅ **Flexible Topics** - Use model classes or custom topics
 - ✅ **Exception System** - Allow specific users to bypass workflows
@@ -451,6 +453,7 @@ composer test
 - **[QUICK_START.md](docs/QUICK_START.md)** - Get started in 5 minutes
 - **[INTEGRATION_GUIDE.md](docs/INTEGRATION_GUIDE.md)** - Complete integration guide
 - **[HOOK_REGISTRATION.md](docs/HOOK_REGISTRATION.md)** - Hook examples and patterns
+- **[FIELD_FILTERING.md](docs/FIELD_FILTERING.md)** - Skip workflows based on field changes
 - **[ExampleController.php](docs/ExampleController.php)** - Working controller example
 
 ## Requirements

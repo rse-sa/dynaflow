@@ -18,6 +18,10 @@ return new class extends Migration
             $table->string('action');
             $table->json('description')->nullable();
             $table->boolean('active')->default(true);
+
+            $table->json('monitored_fields')->nullable();
+            $table->json('ignored_fields')->nullable();
+
             $table->foreignId('overridden_by')->nullable()->constrained('dynaflows')->nullOnDelete();
             $table->timestamps();
 

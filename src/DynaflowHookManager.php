@@ -20,6 +20,8 @@ class DynaflowHookManager
 
     protected array $rejectHooks = [];
 
+    protected array $beforeTriggerHooks = [];
+
     protected ?Closure $authorizationResolver = null;
 
     protected ?Closure $exceptionResolver = null;
@@ -72,6 +74,28 @@ class DynaflowHookManager
     {
         $key = "{$topic}::{$action}";
         $this->rejectHooks[$key][] = $callback;
+    }
+
+    /**
+     * Register a hook to execute before triggering a workflow.
+     *
+     * The callback receives: (Dynaflow $workflow, ?Model $model, array $data, $user)
+     * Return FALSE to skip workflow and apply changes directly.
+     * Return TRUE or NULL to continue with workflow.
+     *
+     * Use this to:
+     * - Check specific fields that changed
+     * - Apply custom business logic for skipping workflows
+     * - Conditionally bypass workflows based on data
+     *
+     * @param  string  $topic  The topic (e.g., Post::class or 'PostPublishing')
+     * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
+     * @param  Closure  $callback  The callback to execute
+     */
+    public function beforeTrigger(string $topic, string $action, Closure $callback): void
+    {
+        $key = "{$topic}::{$action}";
+        $this->beforeTriggerHooks[$key][] = $callback;
     }
 
     public function authorizeStepUsing(Closure $callback): void
@@ -236,5 +260,37 @@ class DynaflowHookManager
             || ! empty($this->completeHooks["{$topic}::*"])
             || ! empty($this->completeHooks["*::{$action}"])
             || ! empty($this->completeHooks[$key]);
+    }
+
+    /**
+     * Run beforeTrigger hooks for a workflow.
+     *
+     * @param  Dynaflow  $workflow
+     * @param  mixed  $model
+     * @param  array  $data
+     * @param  mixed  $user
+     * @return bool Returns FALSE if any hook returns FALSE (skip workflow), TRUE otherwise
+     */
+    public function runBeforeTriggerHooks(Dynaflow $workflow, mixed $model, array $data, mixed $user): bool
+    {
+        $topic = $workflow->topic;
+        $action = $workflow->action;
+        $key = "{$topic}::{$action}";
+
+        $hooks = array_merge(
+            $this->beforeTriggerHooks['*::*'] ?? [],
+            $this->beforeTriggerHooks["{$topic}::*"] ?? [],
+            $this->beforeTriggerHooks["*::{$action}"] ?? [],
+            $this->beforeTriggerHooks[$key] ?? []
+        );
+
+        foreach ($hooks as $hook) {
+            $result = $hook($workflow, $model, $data, $user);
+            if ($result === false) {
+                return false; // Skip workflow
+            }
+        }
+
+        return true; // Continue with workflow
     }
 }
