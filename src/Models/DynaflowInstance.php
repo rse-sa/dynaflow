@@ -24,11 +24,15 @@ class DynaflowInstance extends Model
         'triggered_by_type',
         'triggered_by_id',
         'current_step_id',
+        'step_started_at',
         'completed_at',
+        'cancelled_at',
     ];
 
     protected $casts = [
-        'completed_at' => 'datetime',
+        'step_started_at' => 'datetime',
+        'completed_at'    => 'datetime',
+        'cancelled_at'    => 'datetime',
     ];
 
     public function dynaflow(): BelongsTo

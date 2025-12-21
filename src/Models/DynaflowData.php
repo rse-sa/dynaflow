@@ -26,4 +26,32 @@ class DynaflowData extends Model
     {
         return $this->belongsTo(DynaflowInstance::class, 'dynaflow_instance_id');
     }
+
+    /**
+     * Get model data from the data array.
+     */
+    public function getModelData(): array
+    {
+        return $this->data['model'] ?? [];
+    }
+
+    /**
+     * Get relationship data from the data array.
+     *
+     * @param  string|null  $name  If specified, returns only that relationship's data
+     */
+    public function getRelationshipData(?string $name = null): array
+    {
+        $relationships = $this->data['relationships'] ?? [];
+
+        return $name ? ($relationships[$name] ?? []) : $relationships;
+    }
+
+    /**
+     * Check if data has a specific relationship.
+     */
+    public function hasRelationship(string $name): bool
+    {
+        return isset($this->data['relationships'][$name]);
+    }
 }

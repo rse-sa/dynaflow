@@ -40,8 +40,8 @@ class FieldFilteringTest extends TestCase
         ]);
 
         // Register completion hook
-        DynaflowFacade::onComplete(Post::class, 'update', function ($instance, $user) {
-            $instance->model->update($instance->dynaflowData->data);
+        DynaflowFacade::onComplete(Post::class, 'update', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $ctx->model()->update($ctx->pendingData());
         });
 
         $engine = app(DynaflowEngine::class);
@@ -84,8 +84,8 @@ class FieldFilteringTest extends TestCase
         ]);
 
         // Register completion hook
-        DynaflowFacade::onComplete(Post::class, 'update', function ($instance, $user) {
-            $instance->model->update($instance->dynaflowData->data);
+        DynaflowFacade::onComplete(Post::class, 'update', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $ctx->model()->update($ctx->pendingData());
         });
 
         $engine = app(DynaflowEngine::class);
@@ -128,8 +128,8 @@ class FieldFilteringTest extends TestCase
         ]);
 
         // Register completion hook
-        DynaflowFacade::onComplete(Post::class, 'update', function ($instance, $user) {
-            $instance->model->update($instance->dynaflowData->data);
+        DynaflowFacade::onComplete(Post::class, 'update', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $ctx->model()->update($ctx->pendingData());
         });
 
         $engine = app(DynaflowEngine::class);
@@ -172,8 +172,8 @@ class FieldFilteringTest extends TestCase
         ]);
 
         // Register completion hook
-        DynaflowFacade::onComplete(Post::class, 'update', function ($instance, $user) {
-            $instance->model->update($instance->dynaflowData->data);
+        DynaflowFacade::onComplete(Post::class, 'update', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $ctx->model()->update($ctx->pendingData());
         });
 
         $engine = app(DynaflowEngine::class);
@@ -216,8 +216,8 @@ class FieldFilteringTest extends TestCase
         ]);
 
         // Register completion hook
-        DynaflowFacade::onComplete(Post::class, 'update', function ($instance, $user) {
-            $instance->model->update($instance->dynaflowData->data);
+        DynaflowFacade::onComplete(Post::class, 'update', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $ctx->model()->update($ctx->pendingData());
         });
 
         $engine = app(DynaflowEngine::class);

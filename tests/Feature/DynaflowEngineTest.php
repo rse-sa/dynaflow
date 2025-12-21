@@ -31,23 +31,50 @@ class DynaflowEngineTest extends TestCase
         $hookManager = app(\RSE\DynaFlow\DynaflowHookManager::class);
 
         // Register hooks for all actions on TestModel
-        $hookManager->onComplete(TestModel::class, 'create', function ($instance, $user) {
-            $data  = $instance->dynaflowData->data;
-            $model = TestModel::create($data);
-            $instance->update(['model_id' => $model->getKey()]);
-            $instance->setRelation('model', $model);
-        });
+        $hookManager->onComplete(TestModel::class, 'create', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $snapshot = $ctx->pendingData();
 
-        $hookManager->onComplete(TestModel::class, 'update', function ($instance, $user) {
-            $model = $instance->model;
-            $data  = $instance->dynaflowData->data;
-            if ($model) {
-                $model->update($data);
+            // Check if using draft records
+            if (isset($snapshot['draft_model_id'])) {
+                // Convert draft to real record
+                $draft = TestModel::withDrafts()->find($snapshot['draft_model_id']);
+                $draft->update(['is_draft' => false]);
+                $ctx->instance->update(['model_id' => $draft->id]);
+                $ctx->instance->setRelation('model', $draft);
+            } else {
+                // Create from data
+                $modelData = $snapshot['data'] ?? $snapshot;
+                $model = TestModel::create($modelData);
+                $ctx->instance->update(['model_id' => $model->getKey()]);
+                $ctx->instance->setRelation('model', $model);
             }
         });
 
-        $hookManager->onComplete(TestModel::class, 'delete', function ($instance, $user) {
-            $model = $instance->model;
+        $hookManager->onComplete(TestModel::class, 'update', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $snapshot = $ctx->pendingData();
+            $model    = $ctx->model();
+
+            if (! $model) {
+                return;
+            }
+
+            // Check if using draft records
+            if (isset($snapshot['draft_model_id'])) {
+                // Merge draft into original
+                $draft = TestModel::withDrafts()->find($snapshot['draft_model_id']);
+                if ($draft) {
+                    $model->update($draft->only(['title', 'content']));
+                    $draft->forceDelete();
+                }
+            } else {
+                // Update from data (support both nested and direct structure)
+                $modelData = $snapshot['data'] ?? $snapshot;
+                $model->update($modelData);
+            }
+        });
+
+        $hookManager->onComplete(TestModel::class, 'delete', function (\RSE\DynaFlow\Support\DynaflowContext $ctx) {
+            $model = $ctx->model();
             if ($model) {
                 $model->delete();
             }
@@ -166,21 +193,21 @@ class DynaflowEngineTest extends TestCase
             'triggered_by_id'   => $user->getKey(),
         ]);
 
-        $result = $this->engine->executeStep(
+        $result = $this->engine->transitionTo(
             instance: $instance,
             targetStep: $step2,
-            decision: 'approve',
             user: $user,
-            note: 'Approved'
+            decision: 'approved',
+            notes: 'Approved'
         );
 
-        $this->assertTrue($result);
+        $this->assertInstanceOf(\RSE\DynaFlow\Support\DynaflowContext::class, $result);
         $instance->refresh();
         $this->assertEquals($step2->id, $instance->current_step_id);
         $this->assertDatabaseHas('dynaflow_step_executions', [
             'dynaflow_instance_id' => $instance->id,
             'dynaflow_step_id'     => $step1->id,
-            'decision'             => 'approve',
+            'decision'             => 'approved',
         ]);
     }
 
@@ -195,8 +222,9 @@ class DynaflowEngineTest extends TestCase
         ]);
 
         $step = DynaflowStep::factory()->create([
-            'dynaflow_id' => $dynaflow->id,
-            'is_final'    => true,
+            'dynaflow_id'     => $dynaflow->id,
+            'is_final'        => true,
+            'workflow_status' => 'completed',
         ]);
 
         $step->allowedTransitions()->attach($step->id);
@@ -215,15 +243,28 @@ class DynaflowEngineTest extends TestCase
         ]);
 
         $instance->dynaflowData()->create([
-            'data'    => ['title' => 'New Title'],
+            'data' => [
+                'action_type' => 'update',
+                'timestamp' => now()->toISOString(),
+                'data' => ['title' => 'New Title'],
+                'original_data' => $model->toArray(),
+                'changes' => [
+                    'title' => [
+                        'old' => $model->title,
+                        'new' => 'New Title',
+                        'changed' => true,
+                        'type' => 'string',
+                    ],
+                ],
+            ],
             'applied' => false,
         ]);
 
-        $this->engine->executeStep(
+        $this->engine->transitionTo(
             instance: $instance,
             targetStep: $step,
-            decision: 'approve',
-            user: $user
+            user: $user,
+            decision: 'approved'
         );
 
         $instance->refresh();
@@ -260,15 +301,14 @@ class DynaflowEngineTest extends TestCase
             'triggered_by_id'   => $user->getKey(),
         ]);
 
-        $this->engine->executeStep(
+        $this->engine->cancelWorkflow(
             instance: $instance,
-            targetStep: $step2,
-            decision: 'reject',
-            user: $user
+            user: $user,
+            decision: 'rejected'
         );
 
         $instance->refresh();
-        $this->assertEquals('cancelled', $instance->status);
+        $this->assertEquals('rejected', $instance->status);
     }
 
     public function test_throws_exception_when_user_not_authorized()
@@ -301,11 +341,11 @@ class DynaflowEngineTest extends TestCase
             'triggered_by_id'   => $user->getKey(),
         ]);
 
-        $this->engine->executeStep(
+        $this->engine->transitionTo(
             instance: $instance,
             targetStep: $step2,
-            decision: 'approve',
-            user: $unauthorizedUser
+            user: $unauthorizedUser,
+            decision: 'approved'
         );
     }
 
@@ -330,11 +370,11 @@ class DynaflowEngineTest extends TestCase
             'triggered_by_id'   => $user->getKey(),
         ]);
 
-        $this->engine->executeStep(
+        $this->engine->transitionTo(
             instance: $instance,
             targetStep: $step3,
-            decision: 'approve',
-            user: $user
+            user: $user,
+            decision: 'approved'
         );
     }
 }

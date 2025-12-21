@@ -23,7 +23,7 @@ class DynaflowStepExecutionFactory extends Factory
             'executed_by_id'       => $user->getKey(),
             'decision'             => $this->faker->randomElement(['approve', 'reject', 'request_edit', 'cancel']),
             'note'                 => $this->faker->sentence(),
-            'duration_hours'       => $this->faker->numberBetween(1, 48),
+            'duration'       => $this->faker->numberBetween(1, 48) * 60,
             'executed_at'          => now(),
         ];
     }

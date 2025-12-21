@@ -4,9 +4,8 @@ namespace RSE\DynaFlow;
 
 use Closure;
 use RSE\DynaFlow\Models\Dynaflow;
-use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
-use RSE\DynaFlow\Models\DynaflowStepExecution;
+use RSE\DynaFlow\Support\DynaflowContext;
 
 class DynaflowHookManager
 {
@@ -18,7 +17,7 @@ class DynaflowHookManager
 
     protected array $completeHooks = [];
 
-    protected array $rejectHooks = [];
+    protected array $cancelHooks = [];
 
     protected array $beforeTriggerHooks = [];
 
@@ -40,14 +39,14 @@ class DynaflowHookManager
 
     public function onTransition(string $from, string $to, Closure $callback): void
     {
-        $key                           = "{$from}::{$to}";
+        $key                           = "$from::$to";
         $this->transitionHooks[$key][] = $callback;
     }
 
     /**
      * Register a hook to execute when a workflow completes successfully.
      *
-     * The callback receives: (DynaflowInstance $instance, $user)
+     * The callback receives: (DynaflowContext $context)
      * The callback should perform the final action (create/update/delete/approve/etc)
      *
      * @param  string  $topic  The topic (e.g., Post::class or 'PostPublishing')
@@ -56,24 +55,24 @@ class DynaflowHookManager
      */
     public function onComplete(string $topic, string $action, Closure $callback): void
     {
-        $key = "{$topic}::{$action}";
+        $key                         = "$topic::$action";
         $this->completeHooks[$key][] = $callback;
     }
 
     /**
-     * Register a hook to execute when a workflow is rejected or cancelled.
+     * Register a hook to execute when a workflow is cancelled or rejected.
      *
-     * The callback receives: (DynaflowInstance $instance, $user, $decision)
+     * The callback receives: (DynaflowContext $context)
      * Use this to clean up, notify users, or perform rollback actions
      *
      * @param  string  $topic  The topic (e.g., Post::class or 'PostPublishing')
      * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
      * @param  Closure  $callback  The callback to execute
      */
-    public function onReject(string $topic, string $action, Closure $callback): void
+    public function onCancel(string $topic, string $action, Closure $callback): void
     {
-        $key = "{$topic}::{$action}";
-        $this->rejectHooks[$key][] = $callback;
+        $key                       = "$topic::$action";
+        $this->cancelHooks[$key][] = $callback;
     }
 
     /**
@@ -94,7 +93,7 @@ class DynaflowHookManager
      */
     public function beforeTrigger(string $topic, string $action, Closure $callback): void
     {
-        $key = "{$topic}::{$action}";
+        $key                              = "$topic::$action";
         $this->beforeTriggerHooks[$key][] = $callback;
     }
 
@@ -113,16 +112,24 @@ class DynaflowHookManager
         $this->assigneeResolver = $callback;
     }
 
-    public function runBeforeStepHooks(DynaflowStep $step, DynaflowInstance $instance, $user): bool
+    /**
+     * Run before step hooks
+     *
+     * @param  DynaflowContext  $ctx  The workflow context
+     * @return bool Returns FALSE if any hook blocks execution
+     */
+    public function runBeforeStepHooks(DynaflowContext $ctx): bool
     {
+        $step = $ctx->targetStep;
+
         $hooks = array_merge(
             $this->beforeStepHooks['*'] ?? [],
             $this->beforeStepHooks[$step->id] ?? [],
-            $this->beforeStepHooks[$step->name] ?? []
+            $this->beforeStepHooks[$step->key] ?? [],
         );
 
         foreach ($hooks as $hook) {
-            $result = $hook($step, $instance, $user);
+            $result = $hook($ctx);
             if ($result === false) {
                 return false;
             }
@@ -131,31 +138,45 @@ class DynaflowHookManager
         return true;
     }
 
-    public function runAfterStepHooks(DynaflowStepExecution $execution): void
+    /**
+     * Run after step hooks
+     *
+     * @param  DynaflowContext  $ctx  The workflow context
+     */
+    public function runAfterStepHooks(DynaflowContext $ctx): void
     {
-        $step = $execution->step;
+        $step = $ctx->targetStep;
 
         $hooks = array_merge(
             $this->afterStepHooks['*'] ?? [],
             $this->afterStepHooks[$step->id] ?? [],
-            $this->afterStepHooks[$step->name] ?? []
+            $this->afterStepHooks[$step->key] ?? [],
         );
 
         foreach ($hooks as $hook) {
-            $hook($execution);
+            $hook($ctx);
         }
     }
 
-    public function runTransitionHooks(DynaflowStep $from, DynaflowStep $to, DynaflowInstance $instance, $user): bool
+    /**
+     * Run transition hooks
+     *
+     * @param  DynaflowContext  $ctx  The workflow context
+     * @return bool Returns FALSE if any hook blocks the transition
+     */
+    public function runTransitionHooks(DynaflowContext $ctx): bool
     {
+        $from = $ctx->sourceStep;
+        $to   = $ctx->targetStep;
+
         $keys = [
             '*::*',
-            "*::{$to->id}",
-            "*::{$to->name}",
-            "{$from->id}::*",
-            "{$from->name}::*",
-            "{$from->id}::{$to->id}",
-            "{$from->name}::{$to->name}",
+            '*::' . $to->id,
+            '*::' . $to->key,
+            $from->id . '::*',
+            $from->key . '::*',
+            $from->id . '::' . $to->id,
+            $from->key . '::' . $to->key,
         ];
 
         foreach ($keys as $key) {
@@ -164,7 +185,7 @@ class DynaflowHookManager
             }
 
             foreach ($this->transitionHooks[$key] as $hook) {
-                $result = $hook($from, $to, $instance, $user);
+                $result = $hook($ctx);
                 if ($result === false) {
                     return false;
                 }
@@ -216,71 +237,77 @@ class DynaflowHookManager
         return $this->assigneeResolver !== null;
     }
 
-    public function runCompleteHooks(DynaflowInstance $instance, $user): void
+    /**
+     * Run completion hooks
+     *
+     * @param  DynaflowContext  $ctx  The workflow context
+     */
+    public function runCompleteHooks(DynaflowContext $ctx): void
     {
-        $topic = $instance->dynaflow->topic;
-        $action = $instance->dynaflow->action;
-        $key = "{$topic}::{$action}";
+        $topic  = $ctx->topic();
+        $action = $ctx->action();
+        $key    = "$topic::$action";
 
         $hooks = array_merge(
             $this->completeHooks['*::*'] ?? [],
-            $this->completeHooks["{$topic}::*"] ?? [],
-            $this->completeHooks["*::{$action}"] ?? [],
+            $this->completeHooks["$topic::*"] ?? [],
+            $this->completeHooks["*::$action"] ?? [],
             $this->completeHooks[$key] ?? []
         );
 
         foreach ($hooks as $hook) {
-            $hook($instance, $user);
+            $hook($ctx);
         }
     }
 
-    public function runRejectHooks(DynaflowInstance $instance, $user, string $decision): void
+    /**
+     * Run cancellation hooks
+     *
+     * @param  DynaflowContext  $ctx  The workflow context
+     */
+    public function runCancelHooks(DynaflowContext $ctx): void
     {
-        $topic = $instance->dynaflow->topic;
-        $action = $instance->dynaflow->action;
-        $key = "{$topic}::{$action}";
+        $topic  = $ctx->topic();
+        $action = $ctx->action();
+        $key    = "$topic::$action";
 
         $hooks = array_merge(
-            $this->rejectHooks['*::*'] ?? [],
-            $this->rejectHooks["{$topic}::*"] ?? [],
-            $this->rejectHooks["*::{$action}"] ?? [],
-            $this->rejectHooks[$key] ?? []
+            $this->cancelHooks['*::*'] ?? [],
+            $this->cancelHooks["$topic::*"] ?? [],
+            $this->cancelHooks["*::$action"] ?? [],
+            $this->cancelHooks[$key] ?? []
         );
 
         foreach ($hooks as $hook) {
-            $hook($instance, $user, $decision);
+            $hook($ctx);
         }
     }
 
     public function hasCompleteHook(string $topic, string $action): bool
     {
-        $key = "{$topic}::{$action}";
+        $key = "$topic::$action";
 
         return ! empty($this->completeHooks['*::*'])
-            || ! empty($this->completeHooks["{$topic}::*"])
-            || ! empty($this->completeHooks["*::{$action}"])
+            || ! empty($this->completeHooks["$topic::*"])
+            || ! empty($this->completeHooks["*::$action"])
             || ! empty($this->completeHooks[$key]);
     }
 
     /**
      * Run beforeTrigger hooks for a workflow.
      *
-     * @param  Dynaflow  $workflow
-     * @param  mixed  $model
-     * @param  array  $data
-     * @param  mixed  $user
      * @return bool Returns FALSE if any hook returns FALSE (skip workflow), TRUE otherwise
      */
     public function runBeforeTriggerHooks(Dynaflow $workflow, mixed $model, array $data, mixed $user): bool
     {
-        $topic = $workflow->topic;
+        $topic  = $workflow->topic;
         $action = $workflow->action;
-        $key = "{$topic}::{$action}";
+        $key    = "$topic::$action";
 
         $hooks = array_merge(
             $this->beforeTriggerHooks['*::*'] ?? [],
-            $this->beforeTriggerHooks["{$topic}::*"] ?? [],
-            $this->beforeTriggerHooks["*::{$action}"] ?? [],
+            $this->beforeTriggerHooks["$topic::*"] ?? [],
+            $this->beforeTriggerHooks["*::$action"] ?? [],
             $this->beforeTriggerHooks[$key] ?? []
         );
 

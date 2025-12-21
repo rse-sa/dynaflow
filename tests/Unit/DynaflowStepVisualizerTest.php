@@ -101,7 +101,7 @@ class DynaflowStepVisualizerTest extends TestCase
             'executed_by_id'       => $user->getKey(),
             'decision'             => 'approve',
             'note'                 => 'Test note',
-            'duration_hours'       => 24,
+            'duration'       => 24 * 60,
             'executed_at'          => now(),
         ]);
 

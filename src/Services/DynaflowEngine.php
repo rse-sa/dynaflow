@@ -4,16 +4,20 @@ namespace RSE\DynaFlow\Services;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use RSE\DynaFlow\DynaflowHookManager;
-use RSE\DynaFlow\Enums\DynaflowStepDecision;
+use RSE\DynaFlow\Enums\DynaflowStatus;
+use RSE\DynaFlow\Events\DynaflowCancelled;
 use RSE\DynaFlow\Events\DynaflowCompleted;
-use RSE\DynaFlow\Events\DynaflowStepExecuted;
+use RSE\DynaFlow\Events\StepTransitioned;
 use RSE\DynaFlow\Events\DynaflowTriggered;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowData;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
 use RSE\DynaFlow\Models\DynaflowStepExecution;
+use RSE\DynaFlow\Notifications\DynaflowStepNotification;
+use RSE\DynaFlow\Support\DynaflowContext;
 
 class DynaflowEngine
 {
@@ -55,7 +59,7 @@ class DynaflowEngine
                 $duplicateInstance = $this->validator->getActiveDuplicateInstance($workflow, $model);
 
                 if ($duplicateInstance) {
-                    $duplicateInstance->update(['status' => 'cancelled']);
+                    $duplicateInstance->update(['status' => DynaflowStatus::CANCELLED->value]);
                 }
             }
 
@@ -63,10 +67,11 @@ class DynaflowEngine
                 'dynaflow_id'       => $workflow->id,
                 'model_type'        => $model?->getMorphClass(),
                 'model_id'          => $model?->getKey(),
-                'status'            => 'pending',
+                'status'            => DynaflowStatus::PENDING->value,
                 'triggered_by_type' => $user->getMorphClass(),
                 'triggered_by_id'   => $user->getKey(),
                 'current_step_id'   => $workflow->steps->first()?->id,
+                'step_started_at'   => now(),
             ]);
 
             DynaflowData::create([
@@ -82,104 +87,206 @@ class DynaflowEngine
     }
 
     /**
-     * @throws \Throwable
+     * Transition to target step
+     * Automatically completes workflow if target step is final
+     *
+     * @throws \Exception
      */
-    public function executeStep(
+    public function transitionTo(
         DynaflowInstance $instance,
         DynaflowStep $targetStep,
+        mixed $user,
         string $decision,
-        $user,
-        ?string $note = null
-    ): bool {
+        ?string $notes = null,
+        array $context = []
+    ): DynaflowContext {
         if (! $instance->isPending()) {
             throw new \Exception('Dynaflow instance is not pending');
         }
 
-        if (! $this->validator->canUserExecuteStep($instance->currentStep, $user)) {
+        $sourceStep = $instance->currentStep;
+
+        if (! $this->validator->canUserExecuteStep($sourceStep, $user)) {
             throw new \Exception('User not authorized to execute this step');
         }
 
-        if (! $instance->currentStep->canTransitionTo($targetStep)) {
+        if (! $sourceStep->canTransitionTo($targetStep)) {
             throw new \Exception('Invalid step transition');
         }
 
-        if (! $this->hookManager->runBeforeStepHooks($instance->currentStep, $instance, $user)) {
+        // Create context object
+        $ctx = new DynaflowContext(
+            instance: $instance,
+            targetStep: $targetStep,
+            decision: $decision,
+            user: $user,
+            sourceStep: $sourceStep,
+            execution: null,
+            notes: $notes,
+            data: $context
+        );
+
+        // Run beforeStep hooks (can block)
+        if (! $this->hookManager->runBeforeStepHooks($ctx)) {
             throw new \Exception('Step execution blocked by hook');
         }
 
-        if (! $this->hookManager->runTransitionHooks($instance->currentStep, $targetStep, $instance, $user)) {
+        // Run transition hooks (can block)
+        if (! $this->hookManager->runTransitionHooks($ctx)) {
             throw new \Exception('Transition blocked by hook');
         }
 
-        return DB::transaction(function () use ($instance, $targetStep, $decision, $user, $note) {
-            $lastExecution = $instance->executions()->latest('executed_at')->first();
-            $durationHours = $lastExecution
-                ? now()->diffInHours($lastExecution->executed_at)
-                : now()->diffInHours($instance->created_at);
+        return DB::transaction(function () use ($instance, $targetStep, $ctx) {
+            // Calculate duration
+            $durationSeconds = $this->calculateDuration($instance, $ctx->sourceStep);
 
+            // Create execution record
             $execution = DynaflowStepExecution::create([
                 'dynaflow_instance_id' => $instance->id,
-                'dynaflow_step_id'     => $instance->current_step_id,
-                'executed_by_type'     => $user->getMorphClass(),
-                'executed_by_id'       => $user->getKey(),
-                'decision'             => $decision,
-                'note'                 => $note,
-                'duration_hours'       => $durationHours,
+                'dynaflow_step_id'     => $ctx->sourceStep->id,
+                'executed_by_type'     => $ctx->user->getMorphClass(),
+                'executed_by_id'       => $ctx->user->getKey(),
+                'decision'             => $ctx->decision,
+                'note'                 => $ctx->notes,
+                'duration'             => (int) ($durationSeconds / 60), // Convert to minutes for storage
+                'execution_started_at' => $instance->step_started_at,
                 'executed_at'          => now(),
             ]);
 
-            if (in_array($decision, [DynaflowStepDecision::REJECT->value, DynaflowStepDecision::CANCEL->value])) {
-                $instance->update(['status' => 'cancelled']);
+            // Update context with execution
+            $ctx->execution = $execution;
 
-                // Run rejection hooks
-                $this->hookManager->runRejectHooks($instance, $user, $decision);
+            // Send notifications if enabled
+            $this->sendStepNotifications($ctx);
 
-                $this->hookManager->runAfterStepHooks($execution);
-                event(new DynaflowStepExecuted($execution));
+            // Update instance state
+            $instance->update([
+                'current_step_id' => $targetStep->id,
+                'step_started_at' => now(),
+            ]);
 
-                return true;
+            // Check if workflow should end
+            if ($targetStep->is_final) {
+                $this->completeWorkflow($instance, $ctx);
+            } else {
+                // Fire afterStep hook
+                $this->hookManager->runAfterStepHooks($ctx);
             }
 
-            $instance->update(['current_step_id' => $targetStep->id]);
+            event(new StepTransitioned($ctx));
 
-            if ($targetStep->is_final && $decision === DynaflowStepDecision::APPROVE->value) {
-                $this->completeDynaflow($instance);
-            }
-
-            $this->hookManager->runAfterStepHooks($execution);
-            event(new DynaflowStepExecuted($execution));
-
-            return true;
+            return $ctx;
         });
     }
 
-    protected function completeDynaflow(DynaflowInstance $instance): void
-    {
-        $workflowData = $instance->dynaflowData;
+    /**
+     * Cancel workflow explicitly
+     * Can be called from any step
+     *
+     * @throws \Exception
+     */
+    public function cancelWorkflow(
+        DynaflowInstance $instance,
+        mixed $user,
+        string $decision,
+        ?string $notes = null,
+        array $context = []
+    ): DynaflowContext {
+        if (! $instance->isPending()) {
+            throw new \Exception('Dynaflow instance is not pending');
+        }
 
-        // Get the user who approved the final step
-        $finalExecution = $instance->executions()->latest('executed_at')->first();
-        $user           = $finalExecution?->executedBy ?? $instance->triggeredBy;
+        $sourceStep = $instance->currentStep;
 
-        // Run completion hooks - these will handle the actual action
-        $this->hookManager->runCompleteHooks($instance, $user);
+        // Create context
+        $ctx = new DynaflowContext(
+            instance: $instance,
+            targetStep: $sourceStep, // No target, staying at current
+            decision: $decision,
+            user: $user,
+            sourceStep: $sourceStep,
+            notes: $notes,
+            data: $context
+        );
 
-        $workflowData->update(['applied' => true]);
+        return DB::transaction(function () use ($instance, $ctx, $context) {
+            // Calculate duration
+            $durationSeconds = $this->calculateDuration($instance, $ctx->sourceStep);
+
+            // Create execution record for audit
+            $execution = DynaflowStepExecution::create([
+                'dynaflow_instance_id' => $instance->id,
+                'dynaflow_step_id'     => $ctx->sourceStep->id,
+                'executed_by_type'     => $ctx->user->getMorphClass(),
+                'executed_by_id'       => $ctx->user->getKey(),
+                'decision'             => $ctx->decision,
+                'note'                 => $ctx->notes,
+                'duration'             => (int) ($durationSeconds / 60),
+                'execution_started_at' => $instance->step_started_at,
+                'executed_at'          => now(),
+            ]);
+
+            $ctx->execution = $execution;
+
+            // Update instance
+            $status = $context['status'] ?? $ctx->decision;
+            $instance->update([
+                'status'       => $status,
+                'cancelled_at' => now(),
+            ]);
+
+            // Fire cancellation hooks
+            $this->hookManager->runCancelHooks($ctx);
+
+            event(new DynaflowCancelled($ctx));
+
+            return $ctx;
+        });
+    }
+
+    /**
+     * Complete workflow normally (via final step)
+     */
+    protected function completeWorkflow(
+        DynaflowInstance $instance,
+        DynaflowContext $ctx
+    ): void {
+        // Status priority: step config > decision
+        $status = $ctx->targetStep->workflow_status ?? $ctx->decision;
+
         $instance->update([
-            'status'       => 'completed',
+            'status'       => $status,
             'completed_at' => now(),
         ]);
 
-        event(new DynaflowCompleted($instance));
+        // Mark data as applied (before hooks so hooks can check this)
+        $instance->dynaflowData?->update(['applied' => true]);
+
+        // Fire completion hooks with FULL context
+        $this->hookManager->runCompleteHooks($ctx);
+
+        event(new DynaflowCompleted($ctx));
+    }
+
+    /**
+     * Calculate duration in seconds since last execution or instance creation
+     */
+    protected function calculateDuration(
+        DynaflowInstance $instance,
+        ?DynaflowStep $currentStep
+    ): int {
+        $lastExecution = $instance->executions()
+            ->where('dynaflow_step_id', $currentStep?->id)
+            ->latest('executed_at')
+            ->first();
+
+        $startTime = $lastExecution?->executed_at ?? $instance->step_started_at ?? $instance->created_at;
+
+        return now()->diffInSeconds($startTime, true);
     }
 
     /**
      * Check if workflow should be triggered based on field filtering rules.
-     *
-     * @param  Dynaflow  $workflow
-     * @param  Model  $model
-     * @param  array  $data
-     * @return bool
      */
     protected function shouldTriggerBasedOnFields(Dynaflow $workflow, Model $model, array $data): bool
     {
@@ -193,17 +300,16 @@ class DynaflowEngine
      * Apply changes directly without workflow (no workflow configured or user has exception).
      * Executes completion hooks to perform the actual action.
      *
-     * @param  mixed  $user
      * @return mixed The result from the completion hook (usually the model)
      */
-    protected function applyDirectly(string $topic, string $action, ?Model $model, array $data, $user): mixed
+    protected function applyDirectly(string $topic, string $action, ?Model $model, array $data, mixed $user): mixed
     {
         // Create a temporary instance for the hook to access data
         $tempInstance = new DynaflowInstance([
             'dynaflow_id' => null,
             'model_type'  => $model ? $model->getMorphClass() : null,
             'model_id'    => $model?->id,
-            'status'      => 'completed',
+            'status'      => DynaflowStatus::COMPLETED->value,
         ]);
 
         // Attach a temporary dynaflowData relation
@@ -215,10 +321,63 @@ class DynaflowEngine
         $tempWorkflow = new Dynaflow(['topic' => $topic, 'action' => $action]);
         $tempInstance->setRelation('dynaflow', $tempWorkflow);
 
+        // Create a temporary final step for context
+        $tempStep = new DynaflowStep([
+            'name'            => 'Direct Application',
+            'is_final'        => true,
+            'workflow_status' => 'completed',
+        ]);
+
+        // Create context for direct application
+        $ctx = new DynaflowContext(
+            instance: $tempInstance,
+            targetStep: $tempStep,
+            decision: 'approved', // Direct application is considered approved
+            user: $user,
+            sourceStep: null,
+            execution: null,
+            notes: 'Direct application - no workflow',
+            data: []
+        );
+
         // Run completion hooks - they will perform the actual action
-        $this->hookManager->runCompleteHooks($tempInstance, $user);
+        $this->hookManager->runCompleteHooks($ctx);
 
         // Return the model (or result from hook)
         return $tempInstance->model ?? $model;
+    }
+
+    /**
+     * Send step notifications based on metadata settings
+     */
+    protected function sendStepNotifications(DynaflowContext $ctx): void
+    {
+        $sourceStep = $ctx->sourceStep;
+
+        if (! $sourceStep) {
+            return;
+        }
+
+        // Determine which notification setting to check based on decision
+        $notificationKey = match (strtolower($ctx->decision)) {
+            'approved', 'approve' => 'notify_on_approve',
+            'rejected', 'reject' => 'notify_on_reject',
+            'request_edit', 'edit' => 'notify_on_edit_request',
+            default => null,
+        };
+
+        // Check if notifications are enabled for this decision type
+        if ($notificationKey && $sourceStep->getMetadata($notificationKey)) {
+            // Get assignees for the source step
+            $assignees = $sourceStep->assignees()
+                ->with('assignable')
+                ->get()
+                ->pluck('assignable')
+                ->filter();
+
+            if ($assignees->isNotEmpty()) {
+                Notification::send($assignees, new DynaflowStepNotification($ctx));
+            }
+        }
     }
 }

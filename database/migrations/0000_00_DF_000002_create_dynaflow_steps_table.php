@@ -14,13 +14,18 @@ return new class extends Migration
         Schema::create('dynaflow_steps', function (Blueprint $table) {
             $table->id();
             $table->foreignId('dynaflow_id')->constrained()->cascadeOnDelete();
+            $table->string('key')->nullable()->index();
             $table->json('name');
             $table->json('description')->nullable();
             $table->integer('order');
             $table->boolean('is_final')->default(false);
+            $table->boolean('auto_close')->default(false);
+            $table->string('workflow_status')->nullable();
+            $table->json('metadata')->nullable();
             $table->timestamps();
 
             $table->unique(['dynaflow_id', 'order']);
+            $table->unique(['dynaflow_id', 'key']);
         });
 
         Schema::create('dynaflow_step_transitions', function (Blueprint $table) {
@@ -40,19 +45,6 @@ return new class extends Migration
 
             $table->unique(['dynaflow_step_id', 'assignable_type', 'assignable_id'], 'step_assignable_unique');
         });
-
-        Schema::create('dynaflow_step_executions', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('dynaflow_instance_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('dynaflow_step_id')->constrained()->cascadeOnDelete();
-            $table->nullableUlidMorphs('executed_by');
-            $table->string('decision');
-            $table->text('note')->nullable();
-            $table->integer('duration_hours')->nullable();
-            $table->timestamp('executed_at');
-            $table->timestamps();
-        });
-
     }
 
     /**
@@ -60,9 +52,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('dynaflow_steps');
-        Schema::dropIfExists('dynaflow_step_transitions');
         Schema::dropIfExists('dynaflow_step_assignees');
-        Schema::dropIfExists('dynaflow_step_executions');
+        Schema::dropIfExists('dynaflow_step_transitions');
+        Schema::dropIfExists('dynaflow_steps');
     }
 };

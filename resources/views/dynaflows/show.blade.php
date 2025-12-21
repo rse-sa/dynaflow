@@ -61,6 +61,34 @@
                                         </div>
                                         <p class="text-gray-600 mt-2 ml-11">{{ $step->description }}</p>
 
+                                        {{-- Duration & Notification Info --}}
+                                        @if($step->max_duration_to_reject || $step->max_duration_to_accept || $step->notify_on_approve || $step->notify_on_reject || $step->notify_on_edit_request)
+                                            <div class="mt-3 ml-11 p-3 bg-gray-50 rounded-md space-y-2">
+                                                @if($step->max_duration_to_reject)
+                                                    <div class="flex items-center gap-2 text-sm">
+                                                        <svg class="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                                        <span class="text-gray-700">{{ __('Auto-reject after') }} <strong>{{ $step->max_duration_to_reject }}h</strong></span>
+                                                    </div>
+                                                @endif
+                                                @if($step->max_duration_to_accept)
+                                                    <div class="flex items-center gap-2 text-sm">
+                                                        <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                                        <span class="text-gray-700">{{ __('Auto-accept after') }} <strong>{{ $step->max_duration_to_accept }}h</strong></span>
+                                                    </div>
+                                                @endif
+                                                @if($step->notify_on_approve || $step->notify_on_reject || $step->notify_on_edit_request)
+                                                    <div class="flex items-center gap-2 text-sm">
+                                                        <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path></svg>
+                                                        <span class="text-gray-700">{{ __('Notifications:') }}
+                                                            @if($step->notify_on_approve) <span class="text-green-600">{{ __('Approve') }}</span>@endif
+                                                            @if($step->notify_on_reject) <span class="text-red-600">{{ __('Reject') }}</span>@endif
+                                                            @if($step->notify_on_edit_request) <span class="text-yellow-600">{{ __('Edit Request') }}</span>@endif
+                                                        </span>
+                                                    </div>
+                                                @endif
+                                            </div>
+                                        @endif
+
                                         <div class="mt-4 ml-11 space-y-3">
                                             <div>
                                                 <span class="text-sm font-medium text-gray-700">{{ __('Can transition to:') }}</span>
@@ -228,6 +256,61 @@
                                 <label class="ml-2 text-sm text-gray-700">{{ __('Final Step') }}</label>
                             </div>
 
+                            {{-- Duration Limits Section --}}
+                            <div class="border-t pt-4">
+                                <h4 class="text-sm font-semibold text-gray-900 mb-3">{{ __('Duration Limits (Optional)') }}</h4>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">{{ __('Max Hours to Reject') }}</label>
+                                        <input type="number" name="max_duration_to_reject" x-model="stepForm.max_duration_to_reject" min="1" placeholder="{{ __('Auto-reject after X hours') }}" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-500 mt-1">{{ __('Auto-reject if not processed') }}</p>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">{{ __('Max Hours to Accept') }}</label>
+                                        <input type="number" name="max_duration_to_accept" x-model="stepForm.max_duration_to_accept" min="1" placeholder="{{ __('Auto-accept after X hours') }}" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                        <p class="text-xs text-gray-500 mt-1">{{ __('Auto-accept if not processed') }}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {{-- Email Notifications Section --}}
+                            <div class="border-t pt-4">
+                                <h4 class="text-sm font-semibold text-gray-900 mb-3">{{ __('Email Notifications') }}</h4>
+                                <div class="space-y-2">
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="notify_on_approve" value="1" x-model="stepForm.notify_on_approve" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                        <label class="ml-2 text-sm text-gray-700">{{ __('Notify assignees when approved') }}</label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="notify_on_reject" value="1" x-model="stepForm.notify_on_reject" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                        <label class="ml-2 text-sm text-gray-700">{{ __('Notify assignees when rejected') }}</label>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <input type="checkbox" name="notify_on_edit_request" value="1" x-model="stepForm.notify_on_edit_request" class="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                        <label class="ml-2 text-sm text-gray-700">{{ __('Notify assignees when edit requested') }}</label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {{-- Custom Notification Templates (Optional, Collapsible) --}}
+                            <div class="border-t pt-4" x-data="{ showTemplates: false }">
+                                <button type="button" @click="showTemplates = !showTemplates" class="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:text-blue-600">
+                                    <svg class="w-4 h-4 transition-transform" :class="showTemplates ? 'rotate-90' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                                    {{ __('Custom Notification Templates (Optional)') }}
+                                </button>
+                                <div x-show="showTemplates" x-collapse class="mt-3 space-y-3">
+                                    <p class="text-xs text-gray-600">{{ __('Use placeholders: {step_name}, {decision}, {user_name}, {topic}, {action}, etc.') }}</p>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">{{ __('Email Subject (English)') }}</label>
+                                        <input type="text" name="notification_subject[en]" placeholder="{{ __('e.g., {workflow_name}: {step_name} {decision}') }}" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-2">{{ __('Email Message (English)') }}</label>
+                                        <textarea name="notification_message[en]" rows="3" placeholder="{{ __('e.g., The step {step_name} has been {decision} by {user_name}.') }}" class="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="flex gap-3 pt-4">
                                 <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
                                     {{ __('Save') }}
@@ -343,7 +426,12 @@
                     description_en: '',
                     description_ar: '',
                     order: 1,
-                    is_final: false
+                    is_final: false,
+                    max_duration_to_reject: null,
+                    max_duration_to_accept: null,
+                    notify_on_approve: false,
+                    notify_on_reject: false,
+                    notify_on_edit_request: false
                 },
 
                 editStep(step) {
@@ -354,7 +442,12 @@
                         description_en: step.description?.en || '',
                         description_ar: step.description?.ar || '',
                         order: step.order,
-                        is_final: step.is_final
+                        is_final: step.is_final,
+                        max_duration_to_reject: step.max_duration_to_reject,
+                        max_duration_to_accept: step.max_duration_to_accept,
+                        notify_on_approve: step.notify_on_approve || false,
+                        notify_on_reject: step.notify_on_reject || false,
+                        notify_on_edit_request: step.notify_on_edit_request || false
                     };
                     this.showStepModal = true;
                 },
@@ -368,7 +461,12 @@
                         description_en: '',
                         description_ar: '',
                         order: 1,
-                        is_final: false
+                        is_final: false,
+                        max_duration_to_reject: null,
+                        max_duration_to_accept: null,
+                        notify_on_approve: false,
+                        notify_on_reject: false,
+                        notify_on_edit_request: false
                     };
                 }
             };

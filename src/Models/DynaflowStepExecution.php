@@ -21,12 +21,14 @@ class DynaflowStepExecution extends Model
         'executed_by_id',
         'decision',
         'note',
-        'duration_hours',
+        'duration',
+        'execution_started_at',
         'executed_at',
     ];
 
     protected $casts = [
-        'executed_at' => 'datetime',
+        'execution_started_at' => 'datetime',
+        'executed_at'          => 'datetime',
     ];
 
     public function instance(): BelongsTo

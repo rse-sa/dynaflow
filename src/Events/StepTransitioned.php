@@ -6,7 +6,7 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 use RSE\DynaFlow\Support\DynaflowContext;
 
-class DynaflowCompleted
+class StepTransitioned
 {
     use Dispatchable;
     use SerializesModels;

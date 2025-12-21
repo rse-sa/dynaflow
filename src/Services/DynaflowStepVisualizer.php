@@ -42,8 +42,8 @@ class DynaflowStepVisualizer
                     ],
                     'decision'       => $execution->decision,
                     'note'           => $execution->note,
-                    'duration_hours' => $execution->duration_hours,
-                    'duration_days'  => round($execution->duration_hours / 24, 1),
+                    'duration_hours' => round($execution->duration / 60, 1),
+                    'duration_days'  => round($execution->duration / 60 / 24, 1),
                     'executed_at'    => $execution->executed_at->toIso8601String(),
                 ] : null,
             ];

@@ -7,6 +7,7 @@ use RSE\DynaFlow\DynaflowHookManager;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
 use RSE\DynaFlow\Models\DynaflowStepExecution;
+use RSE\DynaFlow\Support\DynaflowContext;
 use RSE\DynaFlow\Tests\Models\User;
 use RSE\DynaFlow\Tests\TestCase;
 
@@ -30,11 +31,20 @@ class DynaflowHookManagerTest extends TestCase
             $called = true;
         });
 
-        $step     = DynaflowStep::factory()->create();
-        $instance = DynaflowInstance::factory()->create();
-        $user     = User::factory()->create();
+        $sourceStep = DynaflowStep::factory()->create();
+        $targetStep = DynaflowStep::factory()->create();
+        $instance   = DynaflowInstance::factory()->create();
+        $user       = User::factory()->create();
 
-        $this->hookManager->runBeforeStepHooks($step, $instance, $user);
+        $ctx = new DynaflowContext(
+            instance: $instance,
+            targetStep: $targetStep,
+            decision: 'approved',
+            user: $user,
+            sourceStep: $sourceStep
+        );
+
+        $this->hookManager->runBeforeStepHooks($ctx);
 
         $this->assertTrue($called);
     }
@@ -45,11 +55,20 @@ class DynaflowHookManagerTest extends TestCase
             return false;
         });
 
-        $step     = DynaflowStep::factory()->create();
-        $instance = DynaflowInstance::factory()->create();
-        $user     = User::factory()->create();
+        $sourceStep = DynaflowStep::factory()->create();
+        $targetStep = DynaflowStep::factory()->create();
+        $instance   = DynaflowInstance::factory()->create();
+        $user       = User::factory()->create();
 
-        $result = $this->hookManager->runBeforeStepHooks($step, $instance, $user);
+        $ctx = new DynaflowContext(
+            instance: $instance,
+            targetStep: $targetStep,
+            decision: 'approved',
+            user: $user,
+            sourceStep: $sourceStep
+        );
+
+        $result = $this->hookManager->runBeforeStepHooks($ctx);
 
         $this->assertFalse($result);
     }
@@ -62,9 +81,22 @@ class DynaflowHookManagerTest extends TestCase
             $called = true;
         });
 
-        $execution = DynaflowStepExecution::factory()->create();
+        $sourceStep = DynaflowStep::factory()->create();
+        $targetStep = DynaflowStep::factory()->create();
+        $instance   = DynaflowInstance::factory()->create();
+        $user       = User::factory()->create();
+        $execution  = DynaflowStepExecution::factory()->create();
 
-        $this->hookManager->runAfterStepHooks($execution);
+        $ctx = new DynaflowContext(
+            instance: $instance,
+            targetStep: $targetStep,
+            decision: 'approved',
+            user: $user,
+            sourceStep: $sourceStep,
+            execution: $execution
+        );
+
+        $this->hookManager->runAfterStepHooks($ctx);
 
         $this->assertTrue($called);
     }
@@ -82,7 +114,15 @@ class DynaflowHookManagerTest extends TestCase
         $instance = DynaflowInstance::factory()->create();
         $user     = User::factory()->create();
 
-        $this->hookManager->runTransitionHooks($step1, $step2, $instance, $user);
+        $ctx = new DynaflowContext(
+            instance: $instance,
+            targetStep: $step2,
+            decision: 'approved',
+            user: $user,
+            sourceStep: $step1
+        );
+
+        $this->hookManager->runTransitionHooks($ctx);
 
         $this->assertTrue($called);
     }

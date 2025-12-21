@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Arr;
 use RSE\DynaFlow\Database\Factories\DynaflowFactory;
 use Spatie\Translatable\HasTranslations;
 
@@ -28,9 +29,9 @@ class Dynaflow extends Model
     ];
 
     protected $casts = [
-        'active' => 'boolean',
+        'active'           => 'boolean',
         'monitored_fields' => 'array',
-        'ignored_fields' => 'array',
+        'ignored_fields'   => 'array',
     ];
 
     public array $translatable = ['name', 'description'];
@@ -64,7 +65,6 @@ class Dynaflow extends Model
      * Set the fields that should be monitored for changes.
      * Only trigger workflow if these fields are modified.
      *
-     * @param  array  $fields
      * @return $this
      */
     public function setMonitoredFields(array $fields): self
@@ -78,7 +78,6 @@ class Dynaflow extends Model
      * Set the fields that should be ignored.
      * Skip workflow if only these fields are modified.
      *
-     * @param  array  $fields
      * @return $this
      */
     public function setIgnoredFields(array $fields): self
@@ -93,11 +92,23 @@ class Dynaflow extends Model
      *
      * @param  array  $originalData  Original model data
      * @param  array  $newData  New data being applied
-     * @return bool
      */
     public function shouldTriggerForFields(array $originalData, array $newData): bool
     {
-        $changedFields = array_keys(array_diff_assoc($newData, $originalData));
+        $normalize = function($data){
+            foreach ($data as $key => $value) {
+                if(is_array($value) && empty($value)){
+                    $data[$key] = null;
+                }
+            }
+
+            return $data;
+        };
+
+        $changedFields = collect($normalize(Arr::dot($newData)))
+            ->diffAssoc($normalize(Arr::dot($originalData)))
+            ->keys()
+            ->toArray();
 
         if (empty($changedFields)) {
             return false; // No changes
@@ -117,5 +128,71 @@ class Dynaflow extends Model
 
         // No field filtering configured - trigger for any change
         return true;
+    }
+
+    protected function getChangedFields($newData, $originalData, $prefix = '')
+    {
+        $changed = [];
+
+        foreach ($newData as $key => $value) {
+            $dottedKey = $prefix ? "{$prefix}.{$key}" : $key;
+
+            // Key doesn't exist in original data
+            if (! array_key_exists($key, $originalData)) {
+                // If it's an array, add all nested keys
+                if (is_array($value)) {
+                    $changed = array_merge($changed, $this->getAllNestedKeys($value, $dottedKey));
+                } else {
+                    $changed[] = $dottedKey;
+                }
+
+                continue;
+            }
+
+            $oldValue = $originalData[$key];
+
+            // Both are arrays - recurse deeper (DON'T add parent key)
+            if (is_array($value) && is_array($oldValue)) {
+                $nestedChanges = $this->getChangedFields($value, $oldValue, $dottedKey);
+                $changed       = array_merge($changed, $nestedChanges);
+            }
+            // Simple value comparison
+            elseif ($value !== $oldValue) {
+                $changed[] = $dottedKey;
+            }
+        }
+
+        // Check for keys that exist in original but not in new data
+        foreach ($originalData as $key => $value) {
+            if (! array_key_exists($key, $newData)) {
+                $dottedKey = $prefix ? "{$prefix}.{$key}" : $key;
+                // If it's an array, add all nested keys
+                if (is_array($value)) {
+                    $changed = array_merge($changed, $this->getAllNestedKeys($value, $dottedKey));
+                } else {
+                    $changed[] = $dottedKey;
+                }
+            }
+        }
+
+        return $changed;
+    }
+
+    // Helper function to get all nested keys when entire branch is new/removed
+    protected function getAllNestedKeys($array, $prefix)
+    {
+        $keys = [];
+
+        foreach ($array as $key => $value) {
+            $dottedKey = "{$prefix}.{$key}";
+
+            if (is_array($value)) {
+                $keys = array_merge($keys, $this->getAllNestedKeys($value, $dottedKey));
+            } else {
+                $keys[] = $dottedKey;
+            }
+        }
+
+        return $keys;
     }
 }

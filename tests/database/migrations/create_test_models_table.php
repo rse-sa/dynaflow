@@ -12,6 +12,8 @@ return new class extends Migration
             $table->id();
             $table->string('title');
             $table->text('content')->nullable();
+            $table->boolean('is_draft')->default(false)->index();
+            $table->unsignedBigInteger('replaces_id')->nullable();
             $table->timestamps();
         });
     }
