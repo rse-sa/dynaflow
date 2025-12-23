@@ -6,7 +6,7 @@ use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 use RSE\DynaFlow\Models\DynaflowInstance;
 
-class DynaflowTriggered
+class DynaflowStarted
 {
     use Dispatchable;
     use SerializesModels;

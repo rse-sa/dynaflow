@@ -433,12 +433,12 @@ $preview = $post->getWithPendingChanges();
 Listen to workflow lifecycle:
 
 ```php
-use RSE\DynaFlow\Events\DynaflowTriggered;
+use RSE\DynaFlow\Events\DynaflowStarted;
 use RSE\DynaFlow\Events\StepTransitioned;
 use RSE\DynaFlow\Events\DynaflowCompleted;
 use RSE\DynaFlow\Events\DynaflowCancelled;
 
-Event::listen(DynaflowTriggered::class, function ($event) {
+Event::listen(DynaflowStarted::class, function ($event) {
     // Workflow started
     $instance = $event->instance;
 });

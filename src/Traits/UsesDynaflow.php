@@ -13,8 +13,6 @@ use RSE\DynaFlow\Services\DynaflowEngine;
  * This trait provides a universal method to integrate Dynaflow into your controllers.
  * It supports ANY action (create, update, delete, approve, publish, archive, etc.)
  * and uses hooks to define what happens when workflows complete or are rejected.
- *
- * @package RSE\DynaFlow\Traits
  */
 trait UsesDynaflow
 {
@@ -36,6 +34,8 @@ trait UsesDynaflow
      * @param  mixed|null  $user  The user performing the action (defaults to auth user)
      * @return Model|DynaflowInstance Returns the result (model) or workflow instance
      *
+     * @throws \Throwable
+     *
      * @example
      * // Create action
      * $result = $this->processDynaflow(Post::class, 'create', null, $validated);
@@ -53,7 +53,7 @@ trait UsesDynaflow
         array $data = [],
         $user = null
     ): mixed {
-        $user = $user ?? auth()->user();
+        $user   = $user ?? auth()->user();
         $engine = app(DynaflowEngine::class);
 
         return $engine->trigger(
@@ -76,7 +76,6 @@ trait UsesDynaflow
      * @param  string  $workflowMessage  Message to show when workflow triggered
      * @param  int  $directStatus  HTTP status code for direct application (default: 200)
      * @param  int  $workflowStatus  HTTP status code for workflow (default: 202)
-     * @return JsonResponse
      */
     protected function dynaflowResponse(
         mixed $result,
@@ -88,12 +87,12 @@ trait UsesDynaflow
         if ($result instanceof DynaflowInstance) {
             // Workflow was triggered - changes are pending approval
             return response()->json([
-                'success' => true,
-                'message' => $workflowMessage,
+                'success'           => true,
+                'message'           => $workflowMessage,
                 'requires_approval' => true,
-                'workflow' => [
-                    'id' => $result->id,
-                    'status' => $result->status,
+                'workflow'          => [
+                    'id'           => $result->id,
+                    'status'       => $result->status,
                     'current_step' => $result->currentStep?->name,
                     'triggered_at' => $result->created_at,
                 ],
@@ -102,18 +101,15 @@ trait UsesDynaflow
 
         // Changes were applied directly
         return response()->json([
-            'success' => true,
-            'message' => $directMessage,
+            'success'           => true,
+            'message'           => $directMessage,
             'requires_approval' => false,
-            'data' => $result,
+            'data'              => $result,
         ], $directStatus);
     }
 
     /**
      * Check if the result requires workflow approval.
-     *
-     * @param  mixed  $result
-     * @return bool
      */
     protected function requiresWorkflowApproval(mixed $result): bool
     {

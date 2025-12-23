@@ -10,7 +10,7 @@ use RSE\DynaFlow\DynaflowHookManager;
 use RSE\DynaFlow\Enums\DynaflowStatus;
 use RSE\DynaFlow\Events\DynaflowCancelled;
 use RSE\DynaFlow\Events\DynaflowCompleted;
-use RSE\DynaFlow\Events\DynaflowTriggered;
+use RSE\DynaFlow\Events\DynaflowStarted;
 use RSE\DynaFlow\Events\StepTransitioned;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowData;
@@ -84,7 +84,7 @@ class DynaflowEngine
 
             $this->hookManager->runAfterTriggerHooks($workflow, $instance, $model, $user);
 
-            event(new DynaflowTriggered($instance));
+            event(new DynaflowStarted($instance));
 
             return $instance;
         });
