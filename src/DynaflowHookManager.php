@@ -4,14 +4,15 @@ namespace RSE\DynaFlow;
 
 use Closure;
 use RSE\DynaFlow\Models\Dynaflow;
+use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
 use RSE\DynaFlow\Support\DynaflowContext;
 
 class DynaflowHookManager
 {
-    protected array $beforeStepHooks = [];
+    protected array $beforeTransitionToHooks = [];
 
-    protected array $afterStepHooks = [];
+    protected array $afterTransitionToHooks = [];
 
     protected array $transitionHooks = [];
 
@@ -21,26 +22,27 @@ class DynaflowHookManager
 
     protected array $beforeTriggerHooks = [];
 
+    protected array $afterTriggerHooks = [];
+
     protected ?Closure $authorizationResolver = null;
 
     protected ?Closure $exceptionResolver = null;
 
     protected ?Closure $assigneeResolver = null;
 
-    public function beforeStep(string $stepIdentifier, Closure $callback): void
+    public function beforeTransitionTo(string $stepIdentifier, Closure $callback): void
     {
-        $this->beforeStepHooks[$stepIdentifier][] = $callback;
+        $this->beforeTransitionToHooks[$stepIdentifier][] = $callback;
     }
 
-    public function afterStep(string $stepIdentifier, Closure $callback): void
+    public function afterTransitionTo(string $stepIdentifier, Closure $callback): void
     {
-        $this->afterStepHooks[$stepIdentifier][] = $callback;
+        $this->afterTransitionToHooks[$stepIdentifier][] = $callback;
     }
 
     public function onTransition(string $from, string $to, Closure $callback): void
     {
-        $key                           = "$from::$to";
-        $this->transitionHooks[$key][] = $callback;
+        $this->transitionHooks[$from . '::' . $to][] = $callback;
     }
 
     /**
@@ -93,8 +95,12 @@ class DynaflowHookManager
      */
     public function beforeTrigger(string $topic, string $action, Closure $callback): void
     {
-        $key                              = "$topic::$action";
-        $this->beforeTriggerHooks[$key][] = $callback;
+        $this->beforeTriggerHooks[$topic . '::' . $action][] = $callback;
+    }
+
+    public function afterTrigger(string $topic, string $action, Closure $callback): void
+    {
+        $this->afterTriggerHooks[$topic . '::' . $action][] = $callback;
     }
 
     public function authorizeStepUsing(Closure $callback): void
@@ -118,14 +124,15 @@ class DynaflowHookManager
      * @param  DynaflowContext  $ctx  The workflow context
      * @return bool Returns FALSE if any hook blocks execution
      */
-    public function runBeforeStepHooks(DynaflowContext $ctx): bool
+    public function runBeforeTransitionToHooks(DynaflowContext $ctx): bool
     {
         $step = $ctx->targetStep;
 
         $hooks = array_merge(
-            $this->beforeStepHooks['*'] ?? [],
-            $this->beforeStepHooks[$step->id] ?? [],
-            $this->beforeStepHooks[$step->key] ?? [],
+            $this->beforeTransitionToHooks['*'] ?? [],
+            $this->beforeTransitionToHooks[$step->id] ?? [],
+            $this->beforeTransitionToHooks[$step->key] ?? [],
+            $this->beforeTransitionToHooks[$step->dynaflow->action . ':' . $step->key] ?? [],
         );
 
         foreach ($hooks as $hook) {
@@ -143,14 +150,15 @@ class DynaflowHookManager
      *
      * @param  DynaflowContext  $ctx  The workflow context
      */
-    public function runAfterStepHooks(DynaflowContext $ctx): void
+    public function runAfterTransitionToHooks(DynaflowContext $ctx): void
     {
         $step = $ctx->targetStep;
 
         $hooks = array_merge(
-            $this->afterStepHooks['*'] ?? [],
-            $this->afterStepHooks[$step->id] ?? [],
-            $this->afterStepHooks[$step->key] ?? [],
+            $this->afterTransitionToHooks['*'] ?? [],
+            $this->afterTransitionToHooks[$step->id] ?? [],
+            $this->afterTransitionToHooks[$step->key] ?? [],
+            $this->afterTransitionToHooks[$step->dynaflow->action . ':' . $step->key] ?? [],
         );
 
         foreach ($hooks as $hook) {
@@ -169,14 +177,22 @@ class DynaflowHookManager
         $from = $ctx->sourceStep;
         $to   = $ctx->targetStep;
 
+        $fromLongKey = $from->dynaflow->action . ':' . $from->key;
+        $toLongKey   = $to->dynaflow->action . ':' . $to->key;
+
         $keys = [
             '*::*',
             '*::' . $to->id,
             '*::' . $to->key,
+            '*::' . $toLongKey,
             $from->id . '::*',
             $from->key . '::*',
+            $fromLongKey . '::*',
             $from->id . '::' . $to->id,
             $from->key . '::' . $to->key,
+            $fromLongKey . '::' . $to->key,
+            $from->key . '::' . $toLongKey,
+            $fromLongKey . '::' . $toLongKey,
         ];
 
         foreach ($keys as $key) {
@@ -319,5 +335,26 @@ class DynaflowHookManager
         }
 
         return true; // Continue with workflow
+    }
+
+    /**
+     * Run afterTrigger hooks for a workflow.
+     */
+    public function runAfterTriggerHooks(Dynaflow $workflow, DynaflowInstance $instance, mixed $model, mixed $user): void
+    {
+        $topic  = $workflow->topic;
+        $action = $workflow->action;
+        $key    = $topic . '::' . $action;
+
+        $hooks = array_merge(
+            $this->afterTriggerHooks['*::*'] ?? [],
+            $this->afterTriggerHooks["$topic::*"] ?? [],
+            $this->afterTriggerHooks["*::$action"] ?? [],
+            $this->afterTriggerHooks[$key] ?? []
+        );
+
+        foreach ($hooks as $hook) {
+            $hook($workflow, $instance, $model, $user);
+        }
     }
 }

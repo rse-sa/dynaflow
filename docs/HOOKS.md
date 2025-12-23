@@ -85,7 +85,7 @@ Run before or after specific steps execute.
 
 ```php
 // Before step execution (can block by returning false)
-Dynaflow::beforeStep('manager_review', function (DynaflowContext $ctx) {
+Dynaflow::beforeTransitionTo('manager_review', function (DynaflowContext $ctx) {
     if ($ctx->user->on_leave) {
         return false;  // Block execution
     }
@@ -93,7 +93,7 @@ Dynaflow::beforeStep('manager_review', function (DynaflowContext $ctx) {
 });
 
 // After step execution
-Dynaflow::afterStep('manager_review', function (DynaflowContext $ctx) {
+Dynaflow::afterTransitionTo('manager_review', function (DynaflowContext $ctx) {
     // Log, notify, or perform side effects
     Log::info('Step executed', [
         'step' => $ctx->targetStep->name,
@@ -238,12 +238,12 @@ Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
     // Rejected step also triggers onComplete, but you can check targetStep
 });
 
-// Or use afterStep hooks for specific steps
-Dynaflow::afterStep('approved', function (DynaflowContext $ctx) {
+// Or use afterTransitionTo hooks for specific steps
+Dynaflow::afterTransitionTo('approved', function (DynaflowContext $ctx) {
     $ctx->model()->update($ctx->pendingData());
 });
 
-Dynaflow::afterStep('rejected', function (DynaflowContext $ctx) {
+Dynaflow::afterTransitionTo('rejected', function (DynaflowContext $ctx) {
     Mail::to($ctx->instance->triggeredBy)->send(
         new RequestRejected($ctx->notes)
     );

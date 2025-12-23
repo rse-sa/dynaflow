@@ -27,7 +27,7 @@ class DynaflowHookManagerTest extends TestCase
     {
         $called = false;
 
-        $this->hookManager->beforeStep('*', function () use (&$called) {
+        $this->hookManager->beforeTransitionTo('*', function () use (&$called) {
             $called = true;
         });
 
@@ -44,14 +44,14 @@ class DynaflowHookManagerTest extends TestCase
             sourceStep: $sourceStep
         );
 
-        $this->hookManager->runBeforeStepHooks($ctx);
+        $this->hookManager->runBeforeTransitionToHooks($ctx);
 
         $this->assertTrue($called);
     }
 
     public function test_before_hook_can_block_execution()
     {
-        $this->hookManager->beforeStep('*', function () {
+        $this->hookManager->beforeTransitionTo('*', function () {
             return false;
         });
 
@@ -68,7 +68,7 @@ class DynaflowHookManagerTest extends TestCase
             sourceStep: $sourceStep
         );
 
-        $result = $this->hookManager->runBeforeStepHooks($ctx);
+        $result = $this->hookManager->runBeforeTransitionToHooks($ctx);
 
         $this->assertFalse($result);
     }
@@ -77,7 +77,7 @@ class DynaflowHookManagerTest extends TestCase
     {
         $called = false;
 
-        $this->hookManager->afterStep('*', function () use (&$called) {
+        $this->hookManager->afterTransitionTo('*', function () use (&$called) {
             $called = true;
         });
 
@@ -96,7 +96,7 @@ class DynaflowHookManagerTest extends TestCase
             execution: $execution
         );
 
-        $this->hookManager->runAfterStepHooks($ctx);
+        $this->hookManager->runAfterTransitionToHooks($ctx);
 
         $this->assertTrue($called);
     }

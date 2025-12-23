@@ -2,6 +2,7 @@
 
 namespace RSE\DynaFlow\Services;
 
+use Exception;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -9,8 +10,8 @@ use RSE\DynaFlow\DynaflowHookManager;
 use RSE\DynaFlow\Enums\DynaflowStatus;
 use RSE\DynaFlow\Events\DynaflowCancelled;
 use RSE\DynaFlow\Events\DynaflowCompleted;
-use RSE\DynaFlow\Events\StepTransitioned;
 use RSE\DynaFlow\Events\DynaflowTriggered;
+use RSE\DynaFlow\Events\StepTransitioned;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowData;
 use RSE\DynaFlow\Models\DynaflowInstance;
@@ -26,6 +27,9 @@ class DynaflowEngine
         protected DynaflowHookManager $hookManager
     ) {}
 
+    /**
+     * @throws \Throwable
+     */
     public function trigger(string $topic, string $action, ?Model $model, array $data, $user): mixed
     {
         $workflow = Dynaflow::where('topic', $topic)
@@ -58,9 +62,7 @@ class DynaflowEngine
             if ($model && $model->exists) {
                 $duplicateInstance = $this->validator->getActiveDuplicateInstance($workflow, $model);
 
-                if ($duplicateInstance) {
-                    $duplicateInstance->update(['status' => DynaflowStatus::CANCELLED->value]);
-                }
+                $duplicateInstance?->update(['status' => DynaflowStatus::CANCELLED->value]);
             }
 
             $instance = DynaflowInstance::create([
@@ -80,6 +82,8 @@ class DynaflowEngine
                 'applied'              => false,
             ]);
 
+            $this->hookManager->runAfterTriggerHooks($workflow, $instance, $model, $user);
+
             event(new DynaflowTriggered($instance));
 
             return $instance;
@@ -91,6 +95,7 @@ class DynaflowEngine
      * Automatically completes workflow if target step is final
      *
      * @throws \Exception
+     * @throws \Throwable
      */
     public function transitionTo(
         DynaflowInstance $instance,
@@ -101,17 +106,17 @@ class DynaflowEngine
         array $context = []
     ): DynaflowContext {
         if (! $instance->isPending()) {
-            throw new \Exception('Dynaflow instance is not pending');
+            throw new Exception('Dynaflow instance is not pending');
         }
 
         $sourceStep = $instance->currentStep;
 
         if (! $this->validator->canUserExecuteStep($sourceStep, $user)) {
-            throw new \Exception('User not authorized to execute this step');
+            throw new Exception('User not authorized to execute this step');
         }
 
         if (! $sourceStep->canTransitionTo($targetStep)) {
-            throw new \Exception('Invalid step transition');
+            throw new Exception('Invalid step transition');
         }
 
         // Create context object
@@ -126,14 +131,14 @@ class DynaflowEngine
             data: $context
         );
 
-        // Run beforeStep hooks (can block)
-        if (! $this->hookManager->runBeforeStepHooks($ctx)) {
-            throw new \Exception('Step execution blocked by hook');
+        // Run beforeTransitionTo hooks (can block)
+        if (! $this->hookManager->runBeforeTransitionToHooks($ctx)) {
+            throw new Exception('Step execution blocked by hook');
         }
 
         // Run transition hooks (can block)
         if (! $this->hookManager->runTransitionHooks($ctx)) {
-            throw new \Exception('Transition blocked by hook');
+            throw new Exception('Transition blocked by hook');
         }
 
         return DB::transaction(function () use ($instance, $targetStep, $ctx) {
@@ -169,8 +174,8 @@ class DynaflowEngine
             if ($targetStep->is_final) {
                 $this->completeWorkflow($instance, $ctx);
             } else {
-                // Fire afterStep hook
-                $this->hookManager->runAfterStepHooks($ctx);
+                // Fire afterTransitionTo hook
+                $this->hookManager->runAfterTransitionToHooks($ctx);
             }
 
             event(new StepTransitioned($ctx));
@@ -183,7 +188,7 @@ class DynaflowEngine
      * Cancel workflow explicitly
      * Can be called from any step
      *
-     * @throws \Exception
+     * @throws \Exception|\Throwable
      */
     public function cancelWorkflow(
         DynaflowInstance $instance,
@@ -193,7 +198,7 @@ class DynaflowEngine
         array $context = []
     ): DynaflowContext {
         if (! $instance->isPending()) {
-            throw new \Exception('Dynaflow instance is not pending');
+            throw new Exception('Dynaflow instance is not pending');
         }
 
         $sourceStep = $instance->currentStep;
@@ -307,8 +312,8 @@ class DynaflowEngine
         // Create a temporary instance for the hook to access data
         $tempInstance = new DynaflowInstance([
             'dynaflow_id' => null,
-            'model_type'  => $model ? $model->getMorphClass() : null,
-            'model_id'    => $model?->id,
+            'model_type'  => $model?->getMorphClass(),
+            'model_id'    => $model?->getKey(),
             'status'      => DynaflowStatus::COMPLETED->value,
         ]);
 
