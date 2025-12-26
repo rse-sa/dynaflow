@@ -413,6 +413,151 @@ DynaflowStepAssignee::create([
 ]);
 ```
 
+## Bypass Modes
+
+When users have workflow exceptions, you can control how bypassing works using metadata:
+
+### Available Modes
+
+**1. `manual` (default)** - Skip workflow entirely, no instance created, no audit trail
+
+**2. `direct_complete`** - Jump directly to final step, create minimal audit (one execution record)
+
+**3. `auto_follow`** - Follow complete workflow path step-by-step (linear workflows only)
+
+**4. `custom_steps`** - Follow specific steps you define in metadata
+
+### Configuration
+
+```php
+// Jump to final step
+$workflow->setBypassMode('direct_complete')->save();
+
+// Follow custom steps
+$workflow->setBypassMode('custom_steps', ['manager_review', 'director_approval', 'approved'])->save();
+
+// Or set metadata directly
+$workflow->update([
+    'metadata' => [
+        'bypass' => [
+            'mode' => 'auto_follow'
+        ]
+    ]
+]);
+```
+
+### Detect Bypass in Hooks
+
+```php
+Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
+    if ($ctx->isBypassed()) {
+        // Workflow was bypassed - skip notifications
+        Log::info('Auto-approved for user: ' . $ctx->user->name);
+    }
+
+    // Same logic regardless of bypass
+    $ctx->model()->update($ctx->pendingData());
+});
+```
+
+### Check Bypass Before Triggering
+
+```php
+use RSE\DynaFlow\Facades\Dynaflow;
+
+if (Dynaflow::willBypass(Post::class, 'update', $user)) {
+    // Show "Auto-approved" badge in UI
+    return response()->json(['will_bypass' => true]);
+}
+```
+
+### Per-Workflow Authorization
+
+Set custom authorization for specific workflows (takes precedence over global):
+
+```php
+Dynaflow::authorizeWorkflowStepUsing(Post::class, 'update', function ($step, $user, $instance) {
+    // Custom logic for this specific workflow
+    if ($step->key === 'manager_review') {
+        return $user->isManagerOf($instance->model);
+    }
+
+    // Return null to fall back to global/database check
+    return null;
+});
+```
+
+**Authorization Priority:**
+1. Per-workflow authorizer (highest)
+2. Global authorizer (`authorizeStepUsing`)
+3. Database assignees (lowest)
+
+### Hook Execution During Bypass
+
+All bypass modes (except `manual`) execute transition hooks:
+
+```php
+// These hooks run even during bypass
+Dynaflow::beforeTransitionTo('manager_review', function (DynaflowContext $ctx) {
+    if ($ctx->isBypassed() && !$ctx->model()->isValid()) {
+        // Block bypass if requirements not met
+        return false;
+    }
+});
+
+Dynaflow::afterTransitionTo('final_approval', function (DynaflowContext $ctx) {
+    if ($ctx->isBypassed()) {
+        // Maybe skip email to approvers
+        return;
+    }
+
+    // Send notification
+    Mail::to($assignees)->send(new ApprovalNotification());
+});
+```
+
+### Requirements & Validation
+
+**For `direct_complete` mode:**
+- Workflow MUST have a final step (`is_final = true`)
+
+**For `auto_follow` mode:**
+- Workflow MUST be linear (no branching)
+- Each non-final step must have exactly one allowed transition
+- Will throw exception if branching detected
+
+**For `custom_steps` mode:**
+- Step keys must exist in workflow
+- Last step MUST be final step
+- Steps array must not be empty
+
+### Audit Trail
+
+All bypassed executions have `bypassed=true` flag:
+
+```php
+// Query bypassed executions
+$bypassedExecutions = DynaflowStepExecution::where('bypassed', true)->get();
+
+// Check in code
+if ($execution->bypassed) {
+    // This step was auto-executed during bypass
+}
+```
+
+### Testing Bypass Modes
+
+Factory helpers for easy testing:
+
+```php
+use RSE\DynaFlow\Models\Dynaflow;
+
+// Create workflow with bypass mode
+$workflow = Dynaflow::factory()->directComplete()->create();
+$workflow = Dynaflow::factory()->autoFollow()->create();
+$workflow = Dynaflow::factory()->customSteps(['step1', 'step2', 'final'])->create();
+```
+
 ## Querying Workflows
 
 ```php

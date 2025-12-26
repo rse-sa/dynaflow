@@ -20,6 +20,7 @@ class DynaflowStepExecution extends Model
         'executed_by_type',
         'executed_by_id',
         'decision',
+        'bypassed',
         'note',
         'duration',
         'execution_started_at',
@@ -27,6 +28,7 @@ class DynaflowStepExecution extends Model
     ];
 
     protected $casts = [
+        'bypassed'             => 'boolean',
         'execution_started_at' => 'datetime',
         'executed_at'          => 'datetime',
     ];

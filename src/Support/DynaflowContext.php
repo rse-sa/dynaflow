@@ -17,6 +17,7 @@ class DynaflowContext
         public ?DynaflowStepExecution $execution = null,
         public ?string $notes = null,
         public array $data = [],
+        public bool $isBypassed = false,
     ) {
     }
 
@@ -90,5 +91,13 @@ class DynaflowContext
     public function duration(): ?int
     {
         return $this->execution?->duration;
+    }
+
+    /**
+     * Check if this workflow was auto-completed due to bypass exception
+     */
+    public function isBypassed(): bool
+    {
+        return $this->isBypassed;
     }
 }

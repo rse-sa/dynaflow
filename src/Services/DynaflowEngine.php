@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use RSE\DynaFlow\DynaflowHookManager;
+use RSE\DynaFlow\Enums\BypassMode;
 use RSE\DynaFlow\Enums\DynaflowStatus;
 use RSE\DynaFlow\Events\DynaflowCancelled;
 use RSE\DynaFlow\Events\DynaflowCompleted;
@@ -42,7 +43,14 @@ class DynaflowEngine
         }
 
         if ($this->validator->shouldBypassDynaflow($workflow, $user)) {
-            return $this->applyDirectly($topic, $action, $model, $data, $user);
+            $bypassMode = $workflow->getBypassMode();
+
+            return match ($bypassMode) {
+                BypassMode::DIRECT_COMPLETE->value => $this->triggerWithDirectComplete($workflow, $model, $data, $user),
+                BypassMode::AUTO_FOLLOW->value     => $this->triggerWithAutoFollow($workflow, $model, $data, $user),
+                BypassMode::CUSTOM_STEPS->value    => $this->triggerWithCustomSteps($workflow, $model, $data, $user),
+                default                            => $this->applyDirectly($topic, $action, $model, $data, $user),
+            };
         }
 
         // Check field-based filtering (monitored_fields / ignored_fields)
@@ -88,6 +96,386 @@ class DynaflowEngine
 
             return $instance;
         });
+    }
+
+    /**
+     * Trigger workflow with direct completion (bypass mode: direct_complete)
+     * Jump directly to final step, create single execution record
+     *
+     * @throws \Throwable
+     */
+    protected function triggerWithDirectComplete(
+        Dynaflow $workflow,
+        ?Model $model,
+        array $data,
+        mixed $user
+    ): DynaflowInstance {
+        return DB::transaction(function () use ($workflow, $model, $data, $user) {
+            // Cancel duplicates
+            if ($model && $model->exists) {
+                $this->validator->getActiveDuplicateInstance($workflow, $model)
+                    ?->update(['status' => DynaflowStatus::CANCELLED->value]);
+            }
+
+            // Get final step
+            $finalStep = $workflow->steps()->where('is_final', true)->first();
+            if (! $finalStep) {
+                throw new Exception("Workflow '" . $workflow->name . "' has no final step for direct_complete mode");
+            }
+
+            // Create instance
+            $instance = DynaflowInstance::create([
+                'dynaflow_id'       => $workflow->id,
+                'model_type'        => $model?->getMorphClass(),
+                'model_id'          => $model?->getKey(),
+                'status'            => DynaflowStatus::PENDING->value,
+                'triggered_by_type' => $user->getMorphClass(),
+                'triggered_by_id'   => $user->getKey(),
+                'current_step_id'   => $finalStep->id,
+                'step_started_at'   => now(),
+            ]);
+
+            DynaflowData::create([
+                'dynaflow_instance_id' => $instance->id,
+                'data'                 => $data,
+                'applied'              => false,
+            ]);
+
+            event(new DynaflowStarted($instance));
+
+            // Create context for final step
+            $ctx = new DynaflowContext(
+                instance: $instance,
+                targetStep: $finalStep,
+                decision: 'auto_approved',
+                user: $user,
+                sourceStep: null,
+                execution: null,
+                notes: 'Auto-approved via bypass (direct_complete)',
+                data: [],
+                isBypassed: true
+            );
+
+            // Run beforeTransitionTo hooks (can block)
+            if (! $this->hookManager->runBeforeTransitionToHooks($ctx)) {
+                throw new Exception("Bypass blocked by beforeTransitionTo hook for step '" . $finalStep->key . "'");
+            }
+
+            // Create execution record
+            $execution = DynaflowStepExecution::create([
+                'dynaflow_instance_id' => $instance->id,
+                'dynaflow_step_id'     => $finalStep->id,
+                'executed_by_type'     => $user->getMorphClass(),
+                'executed_by_id'       => $user->getKey(),
+                'decision'             => 'auto_approved',
+                'note'                 => 'Auto-approved via bypass (direct_complete)',
+                'bypassed'             => true,
+                'duration'             => 0,
+                'execution_started_at' => now(),
+                'executed_at'          => now(),
+            ]);
+
+            $ctx->execution = $execution;
+
+            // Run afterTransitionTo hooks
+            $this->hookManager->runAfterTransitionToHooks($ctx);
+
+            // Complete workflow
+            $this->completeWorkflow($instance, $ctx);
+
+            return $instance;
+        });
+    }
+
+    /**
+     * Trigger workflow with auto-follow (bypass mode: auto_follow)
+     * Follow complete linear workflow path step-by-step
+     *
+     * @throws \Throwable
+     */
+    protected function triggerWithAutoFollow(
+        Dynaflow $workflow,
+        ?Model $model,
+        array $data,
+        mixed $user
+    ): DynaflowInstance {
+        return DB::transaction(function () use ($workflow, $model, $data, $user) {
+            // Validate workflow is linear
+            if (! $workflow->isLinear()) {
+                throw new Exception(
+                    "Workflow '" . $workflow->name . "' has branching paths. " .
+                    'Cannot use auto_follow mode. Use custom_steps mode instead.'
+                );
+            }
+
+            // Cancel duplicates
+            if ($model && $model->exists) {
+                $this->validator->getActiveDuplicateInstance($workflow, $model)
+                    ?->update(['status' => DynaflowStatus::CANCELLED->value]);
+            }
+
+            // Build linear path
+            $firstStep = $workflow->steps()->orderBy('order')->first();
+            $stepPath  = $this->buildLinearPath($firstStep);
+
+            if (empty($stepPath)) {
+                throw new Exception("Workflow '" . $workflow->name . "' has no steps");
+            }
+
+            // Create instance
+            $instance = DynaflowInstance::create([
+                'dynaflow_id'       => $workflow->id,
+                'model_type'        => $model?->getMorphClass(),
+                'model_id'          => $model?->getKey(),
+                'status'            => DynaflowStatus::PENDING->value,
+                'triggered_by_type' => $user->getMorphClass(),
+                'triggered_by_id'   => $user->getKey(),
+                'current_step_id'   => $firstStep->id,
+                'step_started_at'   => now(),
+            ]);
+
+            DynaflowData::create([
+                'dynaflow_instance_id' => $instance->id,
+                'data'                 => $data,
+                'applied'              => false,
+            ]);
+
+            event(new DynaflowStarted($instance));
+
+            // Execute each step with hooks
+            $previousStep  = null;
+            $lastExecution = null;
+
+            foreach ($stepPath as $step) {
+                // Create context for this step
+                $ctx = new DynaflowContext(
+                    instance: $instance,
+                    targetStep: $step,
+                    decision: 'auto_approved',
+                    user: $user,
+                    sourceStep: $previousStep,
+                    execution: null,
+                    notes: 'Auto-approved via bypass (auto_follow)',
+                    data: [],
+                    isBypassed: true
+                );
+
+                // Run beforeTransitionTo hooks (can block)
+                if (! $this->hookManager->runBeforeTransitionToHooks($ctx)) {
+                    throw new Exception("Bypass blocked by beforeTransitionTo hook for step '" . $step->key . "'");
+                }
+
+                // Run onTransition hooks if there's a source step (from -> to)
+                if ($previousStep) {
+                    if (! $this->hookManager->runTransitionHooks($ctx)) {
+                        throw new Exception("Bypass blocked by onTransition hook: '" . $previousStep->key . "' -> '" . $step->key . "'");
+                    }
+                }
+
+                // Create execution record
+                $execution = DynaflowStepExecution::create([
+                    'dynaflow_instance_id' => $instance->id,
+                    'dynaflow_step_id'     => $step->id,
+                    'executed_by_type'     => $user->getMorphClass(),
+                    'executed_by_id'       => $user->getKey(),
+                    'decision'             => 'auto_approved',
+                    'note'                 => 'Auto-approved via bypass (auto_follow)',
+                    'bypassed'             => true,
+                    'duration'             => 0,
+                    'execution_started_at' => now(),
+                    'executed_at'          => now(),
+                ]);
+
+                $ctx->execution = $execution;
+
+                // Run afterTransitionTo hooks
+                $this->hookManager->runAfterTransitionToHooks($ctx);
+
+                $previousStep  = $step;
+                $lastExecution = $execution;
+            }
+
+            // Get final step for completion (last step in path)
+            $finalStep = collect($stepPath)->last();
+            $ctx       = new DynaflowContext(
+                instance: $instance,
+                targetStep: $finalStep,
+                decision: 'auto_approved',
+                user: $user,
+                sourceStep: null,
+                execution: $lastExecution,
+                notes: 'Auto-approved via bypass (auto_follow)',
+                data: [],
+                isBypassed: true
+            );
+
+            $this->completeWorkflow($instance, $ctx);
+
+            return $instance;
+        });
+    }
+
+    /**
+     * Trigger workflow with custom steps (bypass mode: custom_steps)
+     * Follow developer-specified steps from metadata
+     *
+     * @throws \Throwable
+     */
+    protected function triggerWithCustomSteps(
+        Dynaflow $workflow,
+        ?Model $model,
+        array $data,
+        mixed $user
+    ): DynaflowInstance {
+        return DB::transaction(function () use ($workflow, $model, $data, $user) {
+            $customStepKeys = $workflow->getBypassSteps();
+
+            if (empty($customStepKeys)) {
+                throw new Exception(
+                    "Workflow '" . $workflow->name . "' uses custom_steps mode but no steps defined in metadata.bypass.steps"
+                );
+            }
+
+            // Resolve step keys to actual steps
+            $steps = [];
+            foreach ($customStepKeys as $stepKey) {
+                $step = $workflow->steps()->where('key', $stepKey)->first();
+                if (! $step) {
+                    throw new Exception("Step '" . $stepKey . "' not found in workflow '" . $workflow->name . "'");
+                }
+                $steps[] = $step;
+            }
+
+            // Validate final step is included
+            $lastStep = end($steps);
+            if (! $lastStep->is_final) {
+                throw new Exception(
+                    'Last step in metadata.bypass.steps must be a final step. ' .
+                    "Got '" . $lastStep->key . "' which is not final."
+                );
+            }
+
+            // Cancel duplicates
+            if ($model && $model->exists) {
+                $this->validator->getActiveDuplicateInstance($workflow, $model)
+                    ?->update(['status' => DynaflowStatus::CANCELLED->value]);
+            }
+
+            // Create instance
+            $instance = DynaflowInstance::create([
+                'dynaflow_id'       => $workflow->id,
+                'model_type'        => $model?->getMorphClass(),
+                'model_id'          => $model?->getKey(),
+                'status'            => DynaflowStatus::PENDING->value,
+                'triggered_by_type' => $user->getMorphClass(),
+                'triggered_by_id'   => $user->getKey(),
+                'current_step_id'   => $steps[0]->id,
+                'step_started_at'   => now(),
+            ]);
+
+            DynaflowData::create([
+                'dynaflow_instance_id' => $instance->id,
+                'data'                 => $data,
+                'applied'              => false,
+            ]);
+
+            event(new DynaflowStarted($instance));
+
+            // Execute each custom step with hooks
+            $previousStep  = null;
+            $lastExecution = null;
+
+            foreach ($steps as $step) {
+                // Create context for this step
+                $ctx = new DynaflowContext(
+                    instance: $instance,
+                    targetStep: $step,
+                    decision: 'auto_approved',
+                    user: $user,
+                    sourceStep: $previousStep,
+                    execution: null,
+                    notes: 'Auto-approved via bypass (custom_steps)',
+                    data: [],
+                    isBypassed: true
+                );
+
+                // Run beforeTransitionTo hooks (can block)
+                if (! $this->hookManager->runBeforeTransitionToHooks($ctx)) {
+                    throw new Exception("Bypass blocked by beforeTransitionTo hook for step '" . $step->key . "'");
+                }
+
+                // Run onTransition hooks if there's a source step (from -> to)
+                if ($previousStep) {
+                    if (! $this->hookManager->runTransitionHooks($ctx)) {
+                        throw new Exception("Bypass blocked by onTransition hook: '" . $previousStep->key . "' -> '" . $step->key . "'");
+                    }
+                }
+
+                // Create execution record
+                $execution = DynaflowStepExecution::create([
+                    'dynaflow_instance_id' => $instance->id,
+                    'dynaflow_step_id'     => $step->id,
+                    'executed_by_type'     => $user->getMorphClass(),
+                    'executed_by_id'       => $user->getKey(),
+                    'decision'             => 'auto_approved',
+                    'note'                 => 'Auto-approved via bypass (custom_steps)',
+                    'bypassed'             => true,
+                    'duration'             => 0,
+                    'execution_started_at' => now(),
+                    'executed_at'          => now(),
+                ]);
+
+                $ctx->execution = $execution;
+
+                // Run afterTransitionTo hooks
+                $this->hookManager->runAfterTransitionToHooks($ctx);
+
+                $previousStep  = $step;
+                $lastExecution = $execution;
+            }
+
+            // Get final step for completion
+            $finalStep = $lastStep;
+            $ctx       = new DynaflowContext(
+                instance: $instance,
+                targetStep: $finalStep,
+                decision: 'auto_approved',
+                user: $user,
+                sourceStep: null,
+                execution: $lastExecution,
+                notes: 'Auto-approved via bypass (custom_steps)',
+                data: [],
+                isBypassed: true
+            );
+
+            $this->completeWorkflow($instance, $ctx);
+
+            return $instance;
+        });
+    }
+
+    /**
+     * Build linear path from first to final step
+     *
+     * @return DynaflowStep[]
+     */
+    protected function buildLinearPath(DynaflowStep $firstStep): array
+    {
+        $path        = [];
+        $currentStep = $firstStep;
+
+        while ($currentStep) {
+            $path[] = $currentStep;
+
+            if ($currentStep->is_final) {
+                break;
+            }
+
+            // Get next step (only one allowed in linear workflow)
+            $currentStep = $currentStep->allowedTransitions()->first();
+        }
+
+        return $path;
     }
 
     /**

@@ -47,8 +47,20 @@ class DynaflowValidator
             ->first();
     }
 
-    public function canUserExecuteStep(DynaflowStep $step, $user): bool
+    public function canUserExecuteStep(DynaflowStep $step, $user, ?DynaflowInstance $instance = null): bool
     {
+        $workflow    = $step->dynaflow;
+        $workflowKey = $workflow->topic . '::' . $workflow->action;
+
+        // 1. Check per-workflow authorizer (highest priority)
+        if ($instance && $this->hookManager->hasWorkflowAuthorizer($workflowKey)) {
+            $result = $this->hookManager->resolveWorkflowAuthorization($workflowKey, $step, $user, $instance);
+            if ($result !== null) {
+                return $result;
+            }
+        }
+
+        // 2. Check global custom resolver
         if ($this->hookManager->hasAuthorizationResolver()) {
             $customResult = $this->hookManager->resolveAuthorization($step, $user);
 
@@ -57,6 +69,7 @@ class DynaflowValidator
             }
         }
 
+        // 3. Check database assignees
         $assignees = $this->hookManager->hasAssigneeResolver()
             ? $this->hookManager->resolveAssignees($step, $user)
             : $step->assignees->pluck('assignable_id')->toArray();

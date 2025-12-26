@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Arr;
 use RSE\DynaFlow\Database\Factories\DynaflowFactory;
+use RSE\DynaFlow\Enums\BypassMode;
 use Spatie\Translatable\HasTranslations;
 
 #[UseFactory(DynaflowFactory::class)]
@@ -26,12 +27,14 @@ class Dynaflow extends Model
         'overridden_by',
         'monitored_fields',
         'ignored_fields',
+        'metadata',
     ];
 
     protected $casts = [
         'active'           => 'boolean',
         'monitored_fields' => 'array',
         'ignored_fields'   => 'array',
+        'metadata'         => 'array',
     ];
 
     public array $translatable = ['name', 'description'];
@@ -95,9 +98,9 @@ class Dynaflow extends Model
      */
     public function shouldTriggerForFields(array $originalData, array $newData): bool
     {
-        $normalize = function($data){
+        $normalize = function ($data) {
             foreach ($data as $key => $value) {
-                if(is_array($value) && empty($value)){
+                if (is_array($value) && empty($value)) {
                     $data[$key] = null;
                 }
             }
@@ -194,5 +197,53 @@ class Dynaflow extends Model
         }
 
         return $keys;
+    }
+
+    /**
+     * Get bypass mode from metadata
+     */
+    public function getBypassMode(): string
+    {
+        return $this->metadata['bypass']['mode'] ?? BypassMode::MANUAL->value;
+    }
+
+    /**
+     * Get custom bypass steps from metadata
+     */
+    public function getBypassSteps(): ?array
+    {
+        return $this->metadata['bypass']['steps'] ?? null;
+    }
+
+    /**
+     * Set bypass mode in metadata
+     */
+    public function setBypassMode(string $mode, ?array $steps = null): self
+    {
+        $metadata           = $this->metadata ?? [];
+        $metadata['bypass'] = ['mode' => $mode];
+
+        if ($mode === BypassMode::CUSTOM_STEPS->value && $steps) {
+            $metadata['bypass']['steps'] = $steps;
+        }
+
+        $this->metadata = $metadata;
+
+        return $this;
+    }
+
+    /**
+     * Check if workflow is linear (no branching)
+     * Used for auto_follow mode validation
+     */
+    public function isLinear(): bool
+    {
+        foreach ($this->steps()->where('is_final', false)->get() as $step) {
+            if ($step->allowedTransitions()->count() !== 1) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

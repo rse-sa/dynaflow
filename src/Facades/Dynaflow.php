@@ -13,8 +13,10 @@ use Illuminate\Support\Facades\Facade;
  * @method static void beforeTrigger(string $topic, string $action, \Closure $callback)
  * @method static void afterTrigger(string $topic, string $action, \Closure $callback)
  * @method static void authorizeStepUsing(\Closure $callback)
+ * @method static void authorizeWorkflowStepUsing(string $topic, string $action, \Closure $callback)
  * @method static void exceptionUsing(\Closure $callback)
  * @method static void resolveAssigneesUsing(\Closure $callback)
+ * @method static bool willBypass(string $topic, string $action, mixed $user)
  *
  * @see \RSE\DynaFlow\DynaflowHookManager
  */

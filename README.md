@@ -134,8 +134,44 @@ If workflow should be triggered:
 - Returns HTTP 202 with workflow info
 
 If workflow should be bypassed:
-- Runs completion hook immediately
-- Returns HTTP 200 with model data
+- Behavior depends on bypass mode (see below)
+- Runs completion hook when workflow completes
+
+## Bypass Modes
+
+When users have exceptions, workflows support different bypass behaviors:
+
+**1. `manual` (default)** - Skip workflow entirely, no audit trail
+**2. `direct_complete`** - Jump to final step, minimal audit trail
+**3. `auto_follow`** - Follow all steps automatically (linear workflows only)
+**4. `custom_steps`** - Follow specific steps defined in metadata
+
+```php
+// Configure bypass mode
+$workflow->setBypassMode('direct_complete')->save();
+
+// Or specify custom steps
+$workflow->setBypassMode('custom_steps', ['manager_review', 'approved'])->save();
+
+// Check if user will bypass
+if (Dynaflow::willBypass(Post::class, 'update', $user)) {
+    // Show different UI for auto-approved users
+}
+
+// Detect bypass in hooks
+Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
+    if ($ctx->isBypassed()) {
+        // Skip notifications for bypassed workflows
+    }
+    $ctx->model()->update($ctx->pendingData());
+});
+```
+
+**Why use bypass modes?**
+- Eliminate code duplication (same hook handles normal + bypass)
+- Maintain audit trail even for bypassed workflows
+- Full hook execution ensures business logic runs
+- Flexible granularity (none, minimal, full, custom)
 
 ## Executing Workflow Steps
 

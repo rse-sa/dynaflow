@@ -6,6 +6,7 @@ use Closure;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
+use RSE\DynaFlow\Services\DynaflowValidator;
 use RSE\DynaFlow\Support\DynaflowContext;
 
 class DynaflowHookManager
@@ -29,6 +30,8 @@ class DynaflowHookManager
     protected ?Closure $exceptionResolver = null;
 
     protected ?Closure $assigneeResolver = null;
+
+    protected array $workflowAuthorizers = [];
 
     public function beforeTransitionTo(string $stepIdentifier, Closure $callback): void
     {
@@ -356,5 +359,52 @@ class DynaflowHookManager
         foreach ($hooks as $hook) {
             $hook($workflow, $instance, $model, $user);
         }
+    }
+
+    /**
+     * Register per-workflow authorization resolver
+     * Takes precedence over global authorizeStepUsing
+     */
+    public function authorizeWorkflowStepUsing(string $topic, string $action, Closure $callback): void
+    {
+        $key                               = "$topic::$action";
+        $this->workflowAuthorizers[$key]   = $callback;
+    }
+
+    /**
+     * Check if per-workflow authorizer exists
+     */
+    public function hasWorkflowAuthorizer(string $key): bool
+    {
+        return isset($this->workflowAuthorizers[$key]);
+    }
+
+    /**
+     * Resolve workflow-specific authorization
+     */
+    public function resolveWorkflowAuthorization(string $key, DynaflowStep $step, mixed $user, DynaflowInstance $instance): ?bool
+    {
+        if (! isset($this->workflowAuthorizers[$key])) {
+            return null;
+        }
+
+        return $this->workflowAuthorizers[$key]($step, $user, $instance);
+    }
+
+    /**
+     * Check if workflow will be bypassed for the given user
+     */
+    public function willBypass(string $topic, string $action, mixed $user): bool
+    {
+        $workflow = Dynaflow::where('topic', $topic)
+            ->where('action', $action)
+            ->where('active', true)
+            ->first();
+
+        if (! $workflow) {
+            return false; // No workflow = no bypass (will apply directly)
+        }
+
+        return app(DynaflowValidator::class)->shouldBypassDynaflow($workflow, $user);
     }
 }

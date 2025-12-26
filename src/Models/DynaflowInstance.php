@@ -3,6 +3,7 @@
 namespace RSE\DynaFlow\Models;
 
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -65,18 +66,43 @@ class DynaflowInstance extends Model
         return $this->hasOne(DynaflowData::class);
     }
 
+    public function scopePending(Builder $builder): Builder
+    {
+        return $builder->where('status', 'pending');
+    }
+
+    public function scopeCompleted(Builder $builder): Builder
+    {
+        return $builder->whereIn('status', ['completed', 'auto_approved']);
+    }
+
+    public function scopeAutoApproved(Builder $builder): Builder
+    {
+        return $builder->where('status', 'auto_approved');
+    }
+
+    public function scopeCancelled(Builder $builder): Builder
+    {
+        return $builder->where('status', 'cancelled');
+    }
+
     public function isPending(): bool
     {
-        return $this->status === 'pending';
+        return $this->status == 'pending';
     }
 
     public function isCompleted(): bool
     {
-        return $this->status === 'completed';
+        return $this->status == 'completed' || $this->status == 'auto_approved';
     }
 
     public function isCancelled(): bool
     {
-        return $this->status === 'cancelled';
+        return $this->status == 'cancelled';
+    }
+
+    public function isAutoApproved(): bool
+    {
+        return $this->status == 'auto_approved';
     }
 }
