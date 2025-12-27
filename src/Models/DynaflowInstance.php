@@ -86,6 +86,11 @@ class DynaflowInstance extends Model
         return $builder->where('status', 'cancelled');
     }
 
+    public function scopeWithTopic(Builder $builder, string $topic): Builder
+    {
+        return $builder->whereRelation('dynaflow', 'topic', $topic);
+    }
+
     public function isPending(): bool
     {
         return $this->status == 'pending';

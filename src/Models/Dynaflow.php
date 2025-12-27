@@ -218,8 +218,12 @@ class Dynaflow extends Model
     /**
      * Set bypass mode in metadata
      */
-    public function setBypassMode(string $mode, ?array $steps = null): self
+    public function setBypassMode(string|BypassMode $mode, ?array $steps = null): self
     {
+        if($mode instanceof BypassMode) {
+            $mode = $mode->value;
+        }
+
         $metadata           = $this->metadata ?? [];
         $metadata['bypass'] = ['mode' => $mode];
 
