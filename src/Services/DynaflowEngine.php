@@ -25,8 +25,12 @@ class DynaflowEngine
 {
     public function __construct(
         protected DynaflowValidator $validator,
-        protected DynaflowHookManager $hookManager
-    ) {}
+        protected DynaflowHookManager $hookManager,
+        protected ?AutoStepExecutor $autoStepExecutor = null
+    ) {
+        // Auto-resolve if not injected (for backward compatibility)
+        $this->autoStepExecutor ??= app(AutoStepExecutor::class);
+    }
 
     /**
      * @throws \Throwable
@@ -93,6 +97,19 @@ class DynaflowEngine
             $this->hookManager->runAfterTriggerHooks($workflow, $instance, $model, $user);
 
             event(new DynaflowStarted($instance));
+
+            // Get the first step
+            $firstStep = $workflow->steps->first();
+
+            if ($firstStep) {
+                // Run step activated hooks
+                $this->hookManager->runStepActivatedHooks($instance, $firstStep, $user);
+
+                // Trigger auto-execution if first step is auto-executable
+                if ($firstStep->isAutoExecutable()) {
+                    $this->autoStepExecutor->execute($instance, $firstStep, $user);
+                }
+            }
 
             return $instance;
         });
@@ -564,6 +581,17 @@ class DynaflowEngine
             } else {
                 // Fire afterTransitionTo hook
                 $this->hookManager->runAfterTransitionToHooks($ctx);
+
+                // Reload instance to get fresh state
+                $instance = $instance->fresh();
+
+                // Run step activated hooks for the new step
+                $this->hookManager->runStepActivatedHooks($instance, $targetStep, $ctx->user);
+
+                // Trigger auto-execution if next step is auto-executable
+                if ($targetStep->isAutoExecutable()) {
+                    $this->autoStepExecutor->execute($instance, $targetStep, $ctx->user);
+                }
             }
 
             event(new StepTransitioned($ctx));

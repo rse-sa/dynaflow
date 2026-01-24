@@ -126,6 +126,33 @@ Dynaflow::onTransition('manager_review', '*', function (DynaflowContext $ctx) {
 });
 ```
 
+### Step Activated Hooks
+
+Run when a step becomes the current step (after workflow trigger or transition).
+
+```php
+Dynaflow::onStepActivated('manager_review', function ($instance, $step, $user) {
+    // Notify step assignees
+    $assignees = $step->assignees()->with('assignable')->get();
+    Notification::send($assignees->pluck('assignable'), new StepPendingNotification($instance));
+});
+
+// For all steps
+Dynaflow::onStepActivated('*', function ($instance, $step, $user) {
+    // Log step activation
+    Log::info("Step activated: {$step->key}", ['instance' => $instance->id]);
+
+    // Start SLA timer
+    $instance->update(['step_started_at' => now()]);
+});
+```
+
+**Use cases:**
+- Notify step assignees
+- Start SLA timers
+- Log step transitions
+- Trigger external integrations
+
 ## Registering Hooks
 
 ### In Service Provider

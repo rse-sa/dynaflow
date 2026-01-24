@@ -25,7 +25,8 @@ return new class extends Migration
             $table->foreignId('overridden_by')->nullable()->constrained('dynaflows')->nullOnDelete();
             $table->timestamps();
 
-            $table->unique(['topic', 'action', 'active']);
+            $table->index(['topic', 'action', 'active']);
+            # $table->unique(['topic', 'action', 'active']);
         });
     }
 

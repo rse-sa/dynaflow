@@ -3,9 +3,11 @@
 namespace RSE\DynaFlow;
 
 use Closure;
+use RSE\DynaFlow\Contracts\ActionHandler;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
+use RSE\DynaFlow\Services\ActionHandlerRegistry;
 use RSE\DynaFlow\Services\DynaflowValidator;
 use RSE\DynaFlow\Support\DynaflowContext;
 
@@ -25,6 +27,8 @@ class DynaflowHookManager
 
     protected array $afterTriggerHooks = [];
 
+    protected array $stepActivatedHooks = [];
+
     protected ?Closure $authorizationResolver = null;
 
     protected ?Closure $exceptionResolver = null;
@@ -33,19 +37,38 @@ class DynaflowHookManager
 
     protected array $workflowAuthorizers = [];
 
-    public function beforeTransitionTo(string $stepIdentifier, Closure $callback): void
+    protected array $scripts = [];
+
+    protected array $aiResolvers = [];
+
+    public function beforeTransitionTo(string|array $stepIdentifier, Closure $callback): void
     {
-        $this->beforeTransitionToHooks[$stepIdentifier][] = $callback;
+        $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
+
+        foreach ($identifiers as $identifier) {
+            $this->beforeTransitionToHooks[$identifier][] = $callback;
+        }
     }
 
-    public function afterTransitionTo(string $stepIdentifier, Closure $callback): void
+    public function afterTransitionTo(string|array $stepIdentifier, Closure $callback): void
     {
-        $this->afterTransitionToHooks[$stepIdentifier][] = $callback;
+        $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
+
+        foreach ($identifiers as $identifier) {
+            $this->afterTransitionToHooks[$identifier][] = $callback;
+        }
     }
 
-    public function onTransition(string $from, string $to, Closure $callback): void
+    public function onTransition(string|array $from, string|array $to, Closure $callback): void
     {
-        $this->transitionHooks[$from . '::' . $to][] = $callback;
+        $froms = is_array($from) ? $from : [$from];
+        $tos   = is_array($to) ? $to : [$to];
+
+        foreach ($froms as $fromStep) {
+            foreach ($tos as $toStep) {
+                $this->transitionHooks[$fromStep . '::' . $toStep][] = $callback;
+            }
+        }
     }
 
     /**
@@ -58,10 +81,17 @@ class DynaflowHookManager
      * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
      * @param  Closure  $callback  The callback to execute
      */
-    public function onComplete(string $topic, string $action, Closure $callback): void
+    public function onComplete(string|array $topic, string|array $action, Closure $callback): void
     {
-        $key                         = "$topic::$action";
-        $this->completeHooks[$key][] = $callback;
+        $topics  = is_array($topic) ? $topic : [$topic];
+        $actions = is_array($action) ? $action : [$action];
+
+        foreach ($topics as $t) {
+            foreach ($actions as $a) {
+                $key                         = "$t::$a";
+                $this->completeHooks[$key][] = $callback;
+            }
+        }
     }
 
     /**
@@ -74,10 +104,17 @@ class DynaflowHookManager
      * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
      * @param  Closure  $callback  The callback to execute
      */
-    public function onCancel(string $topic, string $action, Closure $callback): void
+    public function onCancel(string|array $topic, string|array $action, Closure $callback): void
     {
-        $key                       = "$topic::$action";
-        $this->cancelHooks[$key][] = $callback;
+        $topics  = is_array($topic) ? $topic : [$topic];
+        $actions = is_array($action) ? $action : [$action];
+
+        foreach ($topics as $t) {
+            foreach ($actions as $a) {
+                $key                       = "$t::$a";
+                $this->cancelHooks[$key][] = $callback;
+            }
+        }
     }
 
     /**
@@ -96,14 +133,53 @@ class DynaflowHookManager
      * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
      * @param  Closure  $callback  The callback to execute
      */
-    public function beforeTrigger(string $topic, string $action, Closure $callback): void
+    public function beforeTrigger(string|array $topic, string|array $action, Closure $callback): void
     {
-        $this->beforeTriggerHooks[$topic . '::' . $action][] = $callback;
+        $topics  = is_array($topic) ? $topic : [$topic];
+        $actions = is_array($action) ? $action : [$action];
+
+        foreach ($topics as $t) {
+            foreach ($actions as $a) {
+                $this->beforeTriggerHooks[$t . '::' . $a][] = $callback;
+            }
+        }
     }
 
-    public function afterTrigger(string $topic, string $action, Closure $callback): void
+    public function afterTrigger(string|array $topic, string|array $action, Closure $callback): void
     {
-        $this->afterTriggerHooks[$topic . '::' . $action][] = $callback;
+        $topics  = is_array($topic) ? $topic : [$topic];
+        $actions = is_array($action) ? $action : [$action];
+
+        foreach ($topics as $t) {
+            foreach ($actions as $a) {
+                $this->afterTriggerHooks[$t . '::' . $a][] = $callback;
+            }
+        }
+    }
+
+    /**
+     * Register a hook to execute when a step becomes active (current step).
+     *
+     * This hook is triggered when an instance moves to a new step, including:
+     * - After workflow trigger (first step)
+     * - After step transition (next step)
+     * - After delay completes (resumed step)
+     *
+     * Use this for:
+     * - Triggering auto-execution of stateless steps
+     * - Notifying step assignees
+     * - Starting timers or SLAs
+     *
+     * @param  string  $stepIdentifier  Step ID, key, or '*' for all steps
+     * @param  Closure  $callback  Receives (DynaflowInstance $instance, DynaflowStep $step, mixed $user)
+     */
+    public function onStepActivated(string|array $stepIdentifier, Closure $callback): void
+    {
+        $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
+
+        foreach ($identifiers as $identifier) {
+            $this->stepActivatedHooks[$identifier][] = $callback;
+        }
     }
 
     public function authorizeStepUsing(Closure $callback): void
@@ -313,6 +389,32 @@ class DynaflowHookManager
     }
 
     /**
+     * Run step activated hooks.
+     *
+     * Called when a step becomes the current step of an instance.
+     *
+     * @param  DynaflowInstance  $instance  The workflow instance
+     * @param  DynaflowStep  $step  The activated step
+     * @param  mixed  $user  The user who triggered activation
+     */
+    public function runStepActivatedHooks(DynaflowInstance $instance, DynaflowStep $step, mixed $user): void
+    {
+        $workflow = $instance->dynaflow;
+        $longKey  = $workflow->action . ':' . $step->key;
+
+        $hooks = array_merge(
+            $this->stepActivatedHooks['*'] ?? [],
+            $this->stepActivatedHooks[$step->id] ?? [],
+            $this->stepActivatedHooks[$step->key] ?? [],
+            $this->stepActivatedHooks[$longKey] ?? []
+        );
+
+        foreach ($hooks as $hook) {
+            $hook($instance, $step, $user);
+        }
+    }
+
+    /**
      * Run beforeTrigger hooks for a workflow.
      *
      * @return bool Returns FALSE if any hook returns FALSE (skip workflow), TRUE otherwise
@@ -406,5 +508,100 @@ class DynaflowHookManager
         }
 
         return app(DynaflowValidator::class)->shouldBypassDynaflow($workflow, $user);
+    }
+
+    /**
+     * Register an action handler.
+     *
+     * @param  string  $key  Handler identifier (e.g., 'email', 'http', 'script')
+     * @param  ActionHandler|Closure|class-string<ActionHandler>  $handler  Handler
+     */
+    public function registerAction(string $key, ActionHandler|Closure|string $handler): void
+    {
+        app(ActionHandlerRegistry::class)->register($key, $handler);
+    }
+
+    /**
+     * Get an action handler.
+     *
+     * @param  string  $key  Handler identifier
+     */
+    public function getActionHandler(string $key): ?ActionHandler
+    {
+        return app(ActionHandlerRegistry::class)->get($key);
+    }
+
+    /**
+     * Register a script for use in script and decision handlers.
+     *
+     * Scripts are PHP closures that can be selected by admins in the
+     * visual designer but are defined by developers for security.
+     *
+     * @param  string  $key  Script identifier
+     * @param  Closure  $script  The script closure: fn(DynaflowContext $ctx, array $params): mixed
+     */
+    public function registerScript(string $key, Closure $script): void
+    {
+        $this->scripts[$key] = $script;
+    }
+
+    /**
+     * Get a registered script.
+     *
+     * @param  string  $key  Script identifier
+     */
+    public function getScript(string $key): ?Closure
+    {
+        return $this->scripts[$key] ?? null;
+    }
+
+    /**
+     * Get all registered script keys.
+     *
+     * @return array<string>
+     */
+    public function getScriptKeys(): array
+    {
+        return array_keys($this->scripts);
+    }
+
+    /**
+     * Register an AI decision resolver.
+     *
+     * AI resolvers handle routing decisions for decision nodes in AI mode.
+     *
+     * @param  string  $provider  Provider identifier (e.g., 'openai', 'anthropic')
+     * @param  Closure|class-string  $resolver  Resolver: fn(string $prompt, array $allowedRoutes, array $options): string
+     */
+    public function registerAIResolver(string $provider, Closure|string $resolver): void
+    {
+        $this->aiResolvers[$provider] = $resolver;
+    }
+
+    /**
+     * Get an AI decision resolver.
+     *
+     * @param  string  $provider  Provider identifier
+     * @return \Closure|null The resolver or null if not found
+     */
+    public function getAIResolver(string $provider): ?Closure
+    {
+        $resolver = $this->aiResolvers[$provider] ?? null;
+
+        if (is_string($resolver)) {
+            return app($resolver);
+        }
+
+        return $resolver;
+    }
+
+    /**
+     * Check if an AI resolver is registered.
+     *
+     * @param  string  $provider  Provider identifier
+     */
+    public function hasAIResolver(string $provider): bool
+    {
+        return isset($this->aiResolvers[$provider]);
     }
 }

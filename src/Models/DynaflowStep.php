@@ -17,9 +17,22 @@ class DynaflowStep extends Model
     use HasFactory;
     use HasTranslations;
 
+    /**
+     * Stateful step types that require human interaction
+     */
+    public const STATEFUL_TYPES = ['approval', 'form', 'review', 'multi_choice'];
+
+    /**
+     * Stateless step types that auto-execute
+     */
+    public const STATELESS_TYPES = ['action', 'notification', 'http', 'script', 'decision', 'timer', 'parallel', 'join', 'sub_workflow', 'conditional'];
+
     protected $fillable = [
         'dynaflow_id',
         'key',
+        'type',
+        'action_handler',
+        'action_config',
         'name',
         'description',
         'order',
@@ -30,9 +43,10 @@ class DynaflowStep extends Model
     ];
 
     protected $casts = [
-        'is_final'   => 'boolean',
-        'auto_close' => 'boolean',
-        'metadata'   => 'array',
+        'is_final'      => 'boolean',
+        'auto_close'    => 'boolean',
+        'metadata'      => 'array',
+        'action_config' => 'array',
     ];
 
     public array $translatable = ['name', 'description'];
@@ -127,5 +141,81 @@ class DynaflowStep extends Model
         }
 
         return $text;
+    }
+
+    /**
+     * Check if this step type auto-executes (stateless)
+     */
+    public function isAutoExecutable(): bool
+    {
+        return in_array($this->type, self::STATELESS_TYPES, true);
+    }
+
+    /**
+     * Check if this step type requires human interaction (stateful)
+     */
+    public function isStateful(): bool
+    {
+        return in_array($this->type, self::STATEFUL_TYPES, true);
+    }
+
+    /**
+     * Check if this step is a parallel fork gateway
+     */
+    public function isParallelFork(): bool
+    {
+        return $this->type === 'parallel';
+    }
+
+    /**
+     * Check if this step is a join gateway
+     */
+    public function isJoin(): bool
+    {
+        return $this->type === 'join';
+    }
+
+    /**
+     * Check if this step is a decision/conditional gateway
+     */
+    public function isDecision(): bool
+    {
+        return in_array($this->type, ['decision', 'conditional'], true);
+    }
+
+    /**
+     * Get the action handler key for this step
+     */
+    public function getActionHandler(): ?string
+    {
+        return $this->action_handler ?? $this->type;
+    }
+
+    /**
+     * Get action configuration value by key
+     */
+    public function getActionConfig(string $key, mixed $default = null): mixed
+    {
+        return data_get($this->action_config, $key, $default);
+    }
+
+    /**
+     * Set action configuration
+     */
+    public function setActionConfig(array $config): self
+    {
+        $this->action_config = $config;
+
+        return $this;
+    }
+
+    /**
+     * Merge additional action configuration
+     */
+    public function mergeActionConfig(array $config): self
+    {
+        $this->action_config = array_merge($this->action_config ?? [], $config);
+
+        return $this;
     }
 }

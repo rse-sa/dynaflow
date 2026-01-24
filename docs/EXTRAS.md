@@ -334,7 +334,9 @@ $step = DynaflowStep::create([
 ]);
 ```
 
-### Available Placeholders
+### Available Placeholders (Notification Templates)
+
+These placeholders use `{placeholder}` syntax for notification templates:
 
 - `{step_name}` - Step display name
 - `{decision}` - Approve/Reject/Request Edit
@@ -348,6 +350,8 @@ $step = DynaflowStep::create([
 - `{executed_at}` - Execution timestamp
 - `{model_type}` - Model class
 - `{model_id}` - Model ID
+
+> **Note:** For action handler configs (email, http, etc.), use the `{{placeholder}}` syntax instead. See [Action Handlers](ACTION_HANDLERS.md#placeholder-system) for full documentation.
 
 ## Change Tracking
 
@@ -662,3 +666,4 @@ return [
 - [Quick Start](QUICK_START.md) - Get started quickly
 - [Integration](INTEGRATION.md) - Controller integration
 - [Hooks](HOOKS.md) - Hook patterns
+- [Action Handlers](ACTION_HANDLERS.md) - Step types and auto-execution
