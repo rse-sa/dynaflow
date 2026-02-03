@@ -23,18 +23,27 @@ use App\Models\Post;
 public function boot()
 {
     // Flexible parameters - use what you need, in any order!
-    Dynaflow::onComplete(Post::class, 'create', function (array $data, $instance) {
-        $post = Post::create($data);
-        $instance->update(['model_id' => $post->id]);
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'create')
+        ->whenCompleted()
+        ->execute(function (array $data, $instance) {
+            $post = Post::create($data);
+            $instance->update(['model_id' => $post->id]);
+        });
 
-    Dynaflow::onComplete(Post::class, 'update', function (Post $model, array $data) {
-        $model->update($data);
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'update')
+        ->whenCompleted()
+        ->execute(function (Post $model, array $data) {
+            $model->update($data);
+        });
 
-    Dynaflow::onComplete(Post::class, 'delete', function (Post $model) {
-        $model->delete();
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'delete')
+        ->whenCompleted()
+        ->execute(function (Post $model) {
+            $model->delete();
+        });
 }
 ```
 
@@ -180,12 +189,15 @@ public function publish(Post $post)
 Register the completion hook:
 
 ```php
-Dynaflow::onComplete(Post::class, 'publish', function (DynaflowContext $ctx) {
-    $ctx->model()->update([
-        'status' => 'published',
-        'published_at' => now(),
-    ]);
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'publish')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        $ctx->model()->update([
+            'status' => 'published',
+            'published_at' => now(),
+        ]);
+    });
 ```
 
 ## Bypass Workflows for Specific Users

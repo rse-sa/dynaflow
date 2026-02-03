@@ -41,24 +41,27 @@ For complex conditional logic:
 ```php
 use RSE\DynaFlow\Facades\Dynaflow;
 
-Dynaflow::beforeTrigger(Post::class, 'update', function ($workflow, $model, $data, $user) {
-    // Skip if only metadata fields changed
-    $metadataFields = ['view_count', 'likes_count'];
-    $originalData = $model->only(array_keys($data));
-    $changedFields = array_keys(array_diff_assoc($data, $originalData));
-    $onlyMetadata = empty(array_diff($changedFields, $metadataFields));
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->beforeStarting()
+    ->execute(function ($workflow, $model, $data, $user) {
+        // Skip if only metadata fields changed
+        $metadataFields = ['view_count', 'likes_count'];
+        $originalData = $model->only(array_keys($data));
+        $changedFields = array_keys(array_diff_assoc($data, $originalData));
+        $onlyMetadata = empty(array_diff($changedFields, $metadataFields));
 
-    if ($onlyMetadata) {
-        return false;  // Skip workflow
-    }
+        if ($onlyMetadata) {
+            return false;  // Skip workflow
+        }
 
-    // Skip if admin and single field change
-    if ($user->hasRole('admin') && count($data) === 1) {
-        return false;
-    }
+        // Skip if admin and single field change
+        if ($user->hasRole('admin') && count($data) === 1) {
+            return false;
+        }
 
-    return true;  // Trigger workflow
-});
+        return true;  // Trigger workflow
+    });
 ```
 
 ## Draft Support
@@ -146,48 +149,57 @@ public function update(Request $request, Post $post)
 
 ```php
 // CREATE - publish draft
-Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
-    $snapshot = $ctx->instance->dynaflowData->data;
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        $snapshot = $ctx->instance->dynaflowData->data;
 
-    if (isset($snapshot['draft_model_id'])) {
-        $draft = Post::withDrafts()->find($snapshot['draft_model_id']);
-        $draft->update(['is_draft' => false]);
-        $ctx->instance->update(['model_id' => $draft->id]);
-    } else {
-        $post = Post::create($snapshot['data']);
-        $ctx->instance->update(['model_id' => $post->id]);
-    }
-});
+        if (isset($snapshot['draft_model_id'])) {
+            $draft = Post::withDrafts()->find($snapshot['draft_model_id']);
+            $draft->update(['is_draft' => false]);
+            $ctx->instance->update(['model_id' => $draft->id]);
+        } else {
+            $post = Post::create($snapshot['data']);
+            $ctx->instance->update(['model_id' => $post->id]);
+        }
+    });
 
 // UPDATE - merge draft into original
-Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-    $snapshot = $ctx->instance->dynaflowData->data;
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        $snapshot = $ctx->instance->dynaflowData->data;
 
-    if (isset($snapshot['draft_model_id'])) {
-        $draft = Post::withDrafts()->find($snapshot['draft_model_id']);
-        $original = $ctx->model();
+        if (isset($snapshot['draft_model_id'])) {
+            $draft = Post::withDrafts()->find($snapshot['draft_model_id']);
+            $original = $ctx->model();
 
-        // Copy data
-        $original->update($draft->only(['title', 'content']));
+            // Copy data
+            $original->update($draft->only(['title', 'content']));
 
-        // Sync relationships
-        $original->tags()->sync($draft->tags->pluck('id'));
+            // Sync relationships
+            $original->tags()->sync($draft->tags->pluck('id'));
 
-        // Delete draft
-        $draft->forceDelete();
-    } else {
-        $ctx->model()->update($snapshot['data']);
-    }
-});
+            // Delete draft
+            $draft->forceDelete();
+        } else {
+            $ctx->model()->update($snapshot['data']);
+        }
+    });
 
 // CANCEL - clean up draft (handles rejections, cancellations, etc.)
-Dynaflow::onCancel(Post::class, '*', function (DynaflowContext $ctx) {
-    $snapshot = $ctx->instance->dynaflowData->data;
+Dynaflow::builder()
+    ->forWorkflow(Post::class, '*')
+    ->whenCancelled()
+    ->execute(function (DynaflowContext $ctx) {
+        $snapshot = $ctx->instance->dynaflowData->data;
 
-    if (isset($snapshot['draft_model_id'])) {
-        $draft = Post::withDrafts()->find($snapshot['draft_model_id']);
-        $draft?->forceDelete();
-    }
+        if (isset($snapshot['draft_model_id'])) {
+            $draft = Post::withDrafts()->find($snapshot['draft_model_id']);
+            $draft?->forceDelete();
+        }
 });
 ```
 
@@ -385,38 +397,45 @@ Scoped by workflow (recommended):
 use RSE\DynaFlow\Facades\Dynaflow;
 
 // Specific workflow
-Dynaflow::authorizeStepFor(Post::class, 'update', function ($step, $user, $instance) {
-    if ($user->hasRole('admin')) {
-        return true;
-    }
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->authorizeStepUsing()
+    ->execute(function ($step, $user, $instance) {
+        if ($user->hasRole('admin')) {
+            return true;
+        }
 
-    if ($step->key === 'manager_review' && $user->hasRole('manager')) {
-        return true;
-    }
+        if ($step->key === 'manager_review' && $user->hasRole('manager')) {
+            return true;
+        }
 
-    // Return null to fall back to next resolver
-    return null;
-});
+        // Return null to fall back to next resolver
+        return null;
+    });
 
 // All workflows (wildcard)
-Dynaflow::authorizeStepFor('*', '*', function ($step, $user, $instance) {
-    if ($user->hasRole('super_admin')) {
-        return true;
-    }
-    return null;
-});
+Dynaflow::builder()
+    ->authorizeStepUsing()
+    ->execute(function ($step, $user, $instance) {
+        if ($user->hasRole('super_admin')) {
+            return true;
+        }
+        return null;
+    });
 ```
 
 Shortcut for global authorization:
 
 ```php
-// Equivalent to authorizeStepFor('*', '*', ...)
-Dynaflow::authorizeStepUsing(function ($step, $user, $instance) {
-    if ($user->hasRole('admin')) {
-        return true;
-    }
-    return null;
-});
+// Equivalent to forWorkflow('*', '*', ...)->authorizeStepUsing()
+Dynaflow::builder()
+    ->authorizeStepUsing()
+    ->execute(function ($step, $user, $instance) {
+        if ($user->hasRole('admin')) {
+            return true;
+        }
+        return null;
+    });
 ```
 
 ### Assign Users to Steps
@@ -475,15 +494,18 @@ $workflow->update([
 ### Detect Bypass in Hooks
 
 ```php
-Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-    if ($ctx->isBypassed()) {
-        // Workflow was bypassed - skip notifications
-        Log::info('Auto-approved for user: ' . $ctx->user->name);
-    }
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        if ($ctx->isBypassed()) {
+            // Workflow was bypassed - skip notifications
+            Log::info('Auto-approved for user: ' . $ctx->user->name);
+        }
 
-    // Same logic regardless of bypass
-    $ctx->model()->update($ctx->pendingData());
-});
+        // Same logic regardless of bypass
+        $ctx->model()->update($ctx->pendingData());
+    });
 ```
 
 ### Check Bypass Before Triggering
@@ -503,14 +525,20 @@ All authorization resolvers support wildcards:
 
 ```php
 // All actions for Post workflows
-Dynaflow::authorizeStepFor(Post::class, '*', function ($step, $user, $instance) {
-    return $user->canAccessPost($instance->model);
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, '*')
+    ->authorizeStepUsing()
+    ->execute(function ($step, $user, $instance) {
+        return $user->canAccessPost($instance->model);
+    });
 
 // All topics for 'publish' action
-Dynaflow::authorizeStepFor('*', 'publish', function ($step, $user, $instance) {
-    return $user->hasRole('publisher');
-});
+Dynaflow::builder()
+    ->forWorkflow('*', 'publish')
+    ->authorizeStepUsing()
+    ->execute(function ($step, $user, $instance) {
+        return $user->hasRole('publisher');
+    });
 ```
 
 **Authorization Priority (most specific wins):**
@@ -526,18 +554,25 @@ All bypass modes (except `manual`) execute transition hooks:
 
 ```php
 // These hooks run even during bypass
-Dynaflow::beforeTransitionTo('manager_review', function (DynaflowContext $ctx) {
-    if ($ctx->isBypassed() && !$ctx->model()->isValid()) {
-        // Block bypass if requirements not met
-        return false;
-    }
-});
+\RSE\DynaFlow\Facades\Dynaflow::builder()
+    ->forWorkflow('*', '*')
+    ->whenTransitioning()
+    ->to('manager_review')
+    ->execute(function (DynaflowContext $ctx) {
+        if ($ctx->isBypassed() && !$ctx->model()->isValid()) {
+            // Block bypass if requirements not met
+            return false;
+        }
+    });
 
-Dynaflow::afterTransitionTo('final_approval', function (DynaflowContext $ctx) {
-    if ($ctx->isBypassed()) {
-        // Maybe skip email to approvers
-        return;
-    }
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->to('final_approval')
+    ->execute(function (DynaflowContext $ctx) {
+        if ($ctx->isBypassed()) {
+            // Maybe skip email to approvers
+            return;
+        }
 
     // Send notification
     Mail::to($assignees)->send(new ApprovalNotification());
@@ -654,18 +689,24 @@ Register separate hooks:
 ```php
 use RSE\DynaFlow\Support\DynaflowContext;
 
-Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-    // Standard update
-    $ctx->model()->update($ctx->pendingData());
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Standard update
+        $ctx->model()->update($ctx->pendingData());
+    });
 
-Dynaflow::onComplete('PostPublishing', 'update', function (DynaflowContext $ctx) {
-    // Publishing logic
-    $ctx->model()->update([
-        ...$ctx->pendingData(),
-        'published_at' => now(),
-    ]);
-});
+Dynaflow::builder()
+    ->forWorkflow('PostPublishing', 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Publishing logic
+        $ctx->model()->update([
+            ...$ctx->pendingData(),
+            'published_at' => now(),
+        ]);
+    });
 ```
 
 ## Configuration

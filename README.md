@@ -35,18 +35,27 @@ use RSE\DynaFlow\Support\DynaflowContext;
 
 public function boot()
 {
-    Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
-        $post = Post::create($ctx->pendingData());
-        $ctx->instance->update(['model_id' => $post->id]);
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'create')
+        ->whenCompleted()
+        ->execute(function (DynaflowContext $ctx) {
+            $post = Post::create($ctx->pendingData());
+            $ctx->instance->update(['model_id' => $post->id]);
+        });
 
-    Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-        $ctx->model()->update($ctx->pendingData());
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'update')
+        ->whenCompleted()
+        ->execute(function (DynaflowContext $ctx) {
+            $ctx->model()->update($ctx->pendingData());
+        });
 
-    Dynaflow::onCancel(Post::class, '*', function (DynaflowContext $ctx) {
-        // Handle cancellation/rejection
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, '*')
+        ->whenCancelled()
+        ->execute(function (DynaflowContext $ctx) {
+            // Handle cancellation/rejection
+        });
 }
 ```
 

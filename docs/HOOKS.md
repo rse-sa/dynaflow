@@ -18,30 +18,47 @@ Dynaflow hooks define what happens when workflows complete, are cancelled, or tr
 ### Examples
 
 ```php
+use RSE\DynaFlow\Facades\Dynaflow;
+
 // Type hint matching - any order works
-Dynaflow::onComplete(Post::class, 'update', function (Post $model, array $data) {
-    $model->update($data);
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (Post $model, array $data) {
+        $model->update($data);
+    });
 
 // Parameter name matching (no type hint needed)
-Dynaflow::beforeTrigger(Post::class, 'update', function ($data, $user) {
-    // Resolved by parameter names
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->beforeStarting()
+    ->execute(function ($data, $user) {
+        // Resolved by parameter names
+    });
 
 // Mixed - type hint + parameter name
-Dynaflow::afterTransitionTo('review', function (User $user, $decision) {
-    Log::info("{$user->name} decided: {$decision}");
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->to('review')
+    ->execute(function (User $user, $decision) {
+        Log::info("{$user->name} decided: {$decision}");
+    });
 
 // Only use what you need (other params ignored)
-Dynaflow::onComplete(Post::class, 'update', function (Post $post) {
-    $post->publish();
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (Post $post) {
+        $post->publish();
+    });
 
 // Backward compatible - positional still works
-Dynaflow::onComplete(Post::class, 'update', function ($ctx) {
-    $ctx->model()->update($ctx->pendingData());
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function ($ctx) {
+        $ctx->model()->update($ctx->pendingData());
+    });
 ```
 
 ### Available Parameters by Hook Type
@@ -56,9 +73,12 @@ Dynaflow::onComplete(Post::class, 'update', function ($ctx) {
 **Type hints always match first:**
 ```php
 // Post model resolved by type, even if parameter name is different
-Dynaflow::onComplete(Post::class, 'update', function (Post $entity) {
-    // $entity gets the Post model instance
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (Post $entity) {
+        // $entity gets the Post model instance
+    });
 ```
 
 ## Hook Types
@@ -71,27 +91,30 @@ Run when a workflow reaches a final step (any final step).
 use RSE\DynaFlow\Facades\Dynaflow;
 use RSE\DynaFlow\Support\DynaflowContext;
 
-Dynaflow::onComplete($topic, $action, function (DynaflowContext $ctx) {
-    // Access all context data
-    $ctx->instance;     // DynaflowInstance
-    $ctx->user;         // User who executed
-    $ctx->decision;     // Decision string ('approved', 'rejected', etc.)
-    $ctx->sourceStep;   // Previous step
-    $ctx->targetStep;   // Final step reached
-    $ctx->notes;        // Optional notes
-    $ctx->execution;    // DynaflowStepExecution record
+Dynaflow::builder()
+    ->forWorkflow($topic, $action)
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Access all context data
+        $ctx->instance;     // DynaflowInstance
+        $ctx->user;         // User who executed
+        $ctx->decision;     // Decision string ('approved', 'rejected', etc.)
+        $ctx->sourceStep;   // Previous step
+        $ctx->targetStep;   // Final step reached
+        $ctx->notes;        // Optional notes
+        $ctx->execution;    // DynaflowStepExecution record
 
-    // Helper methods
-    $ctx->model();           // Get the model being worked on
-    $ctx->pendingData();     // Get pending changes
-    $ctx->workflowStatus();  // Get workflow status
-    $ctx->duration();        // Get execution duration (seconds)
+        // Helper methods
+        $ctx->model();           // Get the model being worked on
+        $ctx->pendingData();     // Get pending changes
+        $ctx->workflowStatus();  // Get workflow status
+        $ctx->duration();        // Get execution duration (seconds)
 
-    // Apply changes based on final step or decision
-    if ($ctx->decision === 'approved') {
-        $ctx->model()->update($ctx->pendingData());
-    }
-});
+        // Apply changes based on final step or decision
+        if ($ctx->decision === 'approved') {
+            $ctx->model()->update($ctx->pendingData());
+        }
+    });
 ```
 
 **Context Properties:**
@@ -109,15 +132,18 @@ Dynaflow::onComplete($topic, $action, function (DynaflowContext $ctx) {
 Run when a workflow is cancelled (via `cancelWorkflow()` or rejected final step).
 
 ```php
-Dynaflow::onCancel($topic, $action, function (DynaflowContext $ctx) {
-    // Access cancellation context
-    $reason = $ctx->decision;  // 'rejected', 'cancelled', 'withdrawn', etc.
-    $notes = $ctx->notes;
+Dynaflow::builder()
+    ->forWorkflow($topic, $action)
+    ->whenCancelled()
+    ->execute(function (DynaflowContext $ctx) {
+        // Access cancellation context
+        $reason = $ctx->decision;  // 'rejected', 'cancelled', 'withdrawn', etc.
+        $notes = $ctx->notes;
 
-    // Clean up resources
-    // Notify users
-    // Log cancellation
-});
+        // Clean up resources
+        // Notify users
+        // Log cancellation
+    });
 ```
 
 **Note:** `onReject()` has been removed. Use `onCancel()` for all cancellation scenarios. Check `$ctx->decision` to determine the specific reason.
@@ -127,13 +153,18 @@ Dynaflow::onCancel($topic, $action, function (DynaflowContext $ctx) {
 Run before a workflow is triggered. Return `false` to skip the workflow.
 
 ```php
-Dynaflow::beforeTrigger($topic, $action, function ($workflow, $model, $data, $user) {
-    // Custom skip logic
-    if ($shouldSkipWorkflow) {
-        return false;  // Skip workflow, apply changes directly
-    }
-    return true;  // Continue with workflow
-});
+use RSE\DynaFlow\Facades\Dynaflow;
+
+Dynaflow::builder()
+    ->forWorkflow($topic, $action)
+    ->beforeStarting()
+    ->execute(function ($workflow, $model, $data, $user) {
+        // Custom skip logic
+        if ($shouldSkipWorkflow) {
+            return false;  // Skip workflow, apply changes directly
+        }
+        return true;  // Continue with workflow
+    });
 ```
 
 **Note:** This hook does NOT use DynaflowContext (it runs before workflow creation).
@@ -143,23 +174,31 @@ Dynaflow::beforeTrigger($topic, $action, function ($workflow, $model, $data, $us
 Run before or after specific steps execute.
 
 ```php
+use RSE\DynaFlow\Facades\Dynaflow;
+
 // Before step execution (can block by returning false)
-Dynaflow::beforeTransitionTo('manager_review', function (DynaflowContext $ctx) {
-    if ($ctx->user->on_leave) {
-        return false;  // Block execution
-    }
-    return true;
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->to('manager_review')
+    ->execute(function (DynaflowContext $ctx) {
+        if ($ctx->user->on_leave) {
+            return false;  // Block execution
+        }
+        return true;
+    });
 
 // After step execution
-Dynaflow::afterTransitionTo('manager_review', function (DynaflowContext $ctx) {
-    // Log, notify, or perform side effects
-    Log::info('Step executed', [
-        'step' => $ctx->targetStep->name,
-        'decision' => $ctx->decision,
-        'duration' => $ctx->duration()
-    ]);
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->to('manager_review')
+    ->execute(function (DynaflowContext $ctx) {
+        // Log, notify, or perform side effects
+        Log::info('Step executed', [
+            'step' => $ctx->targetStep->name,
+            'decision' => $ctx->decision,
+            'duration' => $ctx->duration()
+        ]);
+    });
 ```
 
 ### Transition Hooks
@@ -167,22 +206,35 @@ Dynaflow::afterTransitionTo('manager_review', function (DynaflowContext $ctx) {
 Run when transitioning between steps. Can block transitions by returning false.
 
 ```php
-Dynaflow::onTransition('manager_review', 'final_approval', function (DynaflowContext $ctx) {
-    // Validate transition conditions
-    if ($ctx->model()->amount > 10000) {
-        return true;  // Allow transition
-    }
-    return false;  // Block transition
-});
+use RSE\DynaFlow\Facades\Dynaflow;
+
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->between('manager_review', 'final_approval')
+    ->execute(function (DynaflowContext $ctx) {
+        // Validate transition conditions
+        if ($ctx->model()->amount > 10000) {
+            return true;  // Allow transition
+        }
+        return false;  // Block transition
+    });
 
 // Wildcard patterns supported
-Dynaflow::onTransition('*', 'final_approval', function (DynaflowContext $ctx) {
-    // Runs for ANY transition to final_approval
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->from('*')
+    ->to('final_approval')
+    ->execute(function (DynaflowContext $ctx) {
+        // Runs for ANY transition to final_approval
+    });
 
-Dynaflow::onTransition('manager_review', '*', function (DynaflowContext $ctx) {
-    // Runs for ANY transition from manager_review
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->from('manager_review')
+    ->to('*')
+    ->execute(function (DynaflowContext $ctx) {
+        // Runs for ANY transition from manager_review
+    });
 ```
 
 ### Step Activated Hooks
@@ -192,31 +244,42 @@ Run when a step becomes the current step (after workflow trigger or transition).
 **Scoped by workflow (recommended):**
 ```php
 // Specific workflow and step
-Dynaflow::onStepActivatedFor(Post::class, 'update', 'manager_review', function (Post $model, User $user) {
-    // Only for Post update workflows, manager_review step
-    Mail::to($user)->send(new ReviewRequired($model));
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenStepActivated('manager_review')
+    ->execute(function (Post $model, User $user) {
+        // Only for Post update workflows, manager_review step
+        Mail::to($user)->send(new ReviewRequired($model));
+    });
 
 // All steps in a specific workflow
-Dynaflow::onStepActivatedFor(Post::class, 'update', '*', function (Post $model, $step) {
-    Log::info("Post update step activated", ['step' => $step->key, 'post' => $model->id]);
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenStepActivated('*')
+    ->execute(function (Post $model, $step) {
+        Log::info("Post update step activated", ['step' => $step->key, 'post' => $model->id]);
+    });
 
 // Specific step across all workflows
-Dynaflow::onStepActivatedFor('*', '*', 'manager_review', function ($instance, $step, $user) {
-    // Notify assignees for manager_review step in any workflow
-    $assignees = $step->assignees()->with('assignable')->get();
-    Notification::send($assignees->pluck('assignable'), new StepPendingNotification($instance));
-});
+Dynaflow::builder()
+    ->forWorkflow('*', '*')
+    ->whenStepActivated('manager_review')
+    ->execute(function ($instance, $step, $user) {
+        // Notify assignees for manager_review step in any workflow
+        $assignees = $step->assignees()->with('assignable')->get();
+        Notification::send($assignees->pluck('assignable'), new StepPendingNotification($instance));
+    });
 ```
 
 **Global shortcut (all workflows):**
 ```php
 // Global - all steps in all workflows
-Dynaflow::onStepActivated('*', function ($instance, $step) {
-    // Start SLA timer
-    $instance->update(['step_started_at' => now()]);
-});
+Dynaflow::builder()
+    ->whenStepActivated('*')
+    ->execute(function ($instance, $step) {
+        // Start SLA timer
+        $instance->update(['step_started_at' => now()]);
+    });
 ```
 
 **Use cases:**
@@ -240,36 +303,51 @@ use App\Models\Post;
 public function boot()
 {
     // CREATE action
-    Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
-        $post = Post::create($ctx->pendingData());
-        $ctx->instance->update(['model_id' => $post->id]);
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'create')
+        ->whenCompleted()
+        ->execute(function (DynaflowContext $ctx) {
+            $post = Post::create($ctx->pendingData());
+            $ctx->instance->update(['model_id' => $post->id]);
+        });
 
     // UPDATE action
-    Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-        $ctx->model()->update($ctx->pendingData());
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'update')
+        ->whenCompleted()
+        ->execute(function (DynaflowContext $ctx) {
+            $ctx->model()->update($ctx->pendingData());
+        });
 
     // DELETE action
-    Dynaflow::onComplete(Post::class, 'delete', function (DynaflowContext $ctx) {
-        $ctx->model()->delete();
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'delete')
+        ->whenCompleted()
+        ->execute(function (DynaflowContext $ctx) {
+            $ctx->model()->delete();
+        });
 
     // CUSTOM action - publish
-    Dynaflow::onComplete(Post::class, 'publish', function (DynaflowContext $ctx) {
-        $ctx->model()->update([
-            'status' => 'published',
-            'published_at' => now(),
-        ]);
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'publish')
+        ->whenCompleted()
+        ->execute(function (DynaflowContext $ctx) {
+            $ctx->model()->update([
+                'status' => 'published',
+                'published_at' => now(),
+            ]);
+        });
 
     // Cancellation hook
-    Dynaflow::onCancel(Post::class, 'create', function (DynaflowContext $ctx) {
-        Log::info('Workflow cancelled', [
-            'reason' => $ctx->decision,
-            'notes' => $ctx->notes
-        ]);
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'create')
+        ->whenCancelled()
+        ->execute(function (DynaflowContext $ctx) {
+            Log::info('Workflow cancelled', [
+                'reason' => $ctx->decision,
+                'notes' => $ctx->notes
+            ]);
+        });
 }
 ```
 
@@ -279,19 +357,28 @@ Use wildcards to register hooks for multiple topics or actions:
 
 ```php
 // All actions for Post
-Dynaflow::onComplete(Post::class, '*', function (DynaflowContext $ctx) {
-    Cache::forget("post_{$ctx->model()->id}");
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, '*')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        Cache::forget("post_{$ctx->model()->id}");
+    });
 
 // All topics for create action
-Dynaflow::onComplete('*', 'create', function (DynaflowContext $ctx) {
-    activity()->log('Model created via workflow');
-});
+Dynaflow::builder()
+    ->forWorkflow('*', 'create')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        activity()->log('Model created via workflow');
+    });
 
 // All topics and actions
-Dynaflow::onComplete('*', '*', function (DynaflowContext $ctx) {
-    // Global completion handler
-});
+Dynaflow::builder()
+    ->forWorkflow('*', '*')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Global completion handler
+    });
 ```
 
 ## Hook Execution Order
@@ -315,6 +402,8 @@ Within each hook type, hooks are executed in order:
 Use multiple final steps for self-documenting workflows:
 
 ```php
+use RSE\DynaFlow\Facades\Dynaflow;
+
 // Setup: Create "Approved" and "Rejected" final steps
 $approvedStep = DynaflowStep::create([
     'key' => 'approved',
@@ -331,23 +420,32 @@ $rejectedStep = DynaflowStep::create([
 ]);
 
 // Hook: Handle based on which final step was reached
-Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-    if ($ctx->targetStep->key === 'approved') {
-        $ctx->model()->update($ctx->pendingData());
-    }
-    // Rejected step also triggers onComplete, but you can check targetStep
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        if ($ctx->targetStep->key === 'approved') {
+            $ctx->model()->update($ctx->pendingData());
+        }
+        // Rejected step also triggers onComplete, but you can check targetStep
+    });
 
 // Or use afterTransitionTo hooks for specific steps
-Dynaflow::afterTransitionTo('approved', function (DynaflowContext $ctx) {
-    $ctx->model()->update($ctx->pendingData());
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->to('approved')
+    ->execute(function (DynaflowContext $ctx) {
+        $ctx->model()->update($ctx->pendingData());
+    });
 
-Dynaflow::afterTransitionTo('rejected', function (DynaflowContext $ctx) {
-    Mail::to($ctx->instance->triggeredBy)->send(
-        new RequestRejected($ctx->notes)
-    );
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->to('rejected')
+    ->execute(function (DynaflowContext $ctx) {
+        Mail::to($ctx->instance->triggeredBy)->send(
+            new RequestRejected($ctx->notes)
+        );
+    });
 ```
 
 ## Pattern B: Simple Cancellation
@@ -364,11 +462,14 @@ $engine->cancelWorkflow(
 );
 
 // Hook handles cancellation
-Dynaflow::onCancel(Post::class, 'update', function (DynaflowContext $ctx) {
-    Mail::to($ctx->instance->triggeredBy)->send(
-        new RequestRejected($ctx->notes)
-    );
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCancelled()
+    ->execute(function (DynaflowContext $ctx) {
+        Mail::to($ctx->instance->triggeredBy)->send(
+            new RequestRejected($ctx->notes)
+        );
+    });
 ```
 
 ## Working with Context Data
@@ -376,12 +477,15 @@ Dynaflow::onCancel(Post::class, 'update', function (DynaflowContext $ctx) {
 ### Accessing Pending Changes
 
 ```php
-Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-    $pendingData = $ctx->pendingData();  // ['title' => '...', 'content' => '...']
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        $pendingData = $ctx->pendingData();  // ['title' => '...', 'content' => '...']
 
-    // Apply changes
-    $ctx->model()->update($pendingData);
-});
+        // Apply changes
+        $ctx->model()->update($pendingData);
+    });
 ```
 
 ### Custom Context Data
@@ -400,36 +504,42 @@ $engine->transitionTo(
 );
 
 // In hook
-Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
-    $ipAddress = $ctx->get('ip_address');
-    $reasonCode = $ctx->get('reason_code');
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        $ipAddress = $ctx->get('ip_address');
+        $reasonCode = $ctx->get('reason_code');
 
-    AuditLog::create([
-        'action' => 'approved',
-        'ip' => $ipAddress,
-        'code' => $reasonCode
-    ]);
-});
+        AuditLog::create([
+            'action' => 'approved',
+            'ip' => $ipAddress,
+            'code' => $reasonCode
+        ]);
+    });
 ```
 
 ### Checking Workflow Information
 
 ```php
-Dynaflow::onComplete('*', '*', function (DynaflowContext $ctx) {
-    $topic = $ctx->topic();          // "App\Models\Post"
-    $action = $ctx->action();        // "update"
-    $status = $ctx->workflowStatus(); // "approved"
-    $duration = $ctx->duration();    // seconds
+Dynaflow::builder()
+    ->forWorkflow('*', '*')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        $topic = $ctx->topic();          // "App\Models\Post"
+        $action = $ctx->action();        // "update"
+        $status = $ctx->workflowStatus(); // "approved"
+        $duration = $ctx->duration();    // seconds
 
-    Log::info("Workflow completed", [
-        'topic' => $topic,
-        'action' => $action,
-        'status' => $status,
-        'duration' => $duration,
-        'from_step' => $ctx->sourceStep->name,
-        'to_step' => $ctx->targetStep->name
-    ]);
-});
+        Log::info("Workflow completed", [
+            'topic' => $topic,
+            'action' => $action,
+            'status' => $status,
+            'duration' => $duration,
+            'from_step' => $ctx->sourceStep->name,
+            'to_step' => $ctx->targetStep->name
+        ]);
+    });
 ```
 
 ## Advanced Patterns
@@ -437,17 +547,20 @@ Dynaflow::onComplete('*', '*', function (DynaflowContext $ctx) {
 ### Conditional Logic Based on Decision
 
 ```php
-Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-    match($ctx->decision) {
-        'approved' => $ctx->model()->update($ctx->pendingData()),
-        'approved_with_conditions' => $ctx->model()->update([
-            ...$ctx->pendingData(),
-            'requires_review' => true
-        ]),
-        'escalated' => Mail::to($admin)->send(new EscalatedRequest($ctx)),
-        default => null
-    };
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        match($ctx->decision) {
+            'approved' => $ctx->model()->update($ctx->pendingData()),
+            'approved_with_conditions' => $ctx->model()->update([
+                ...$ctx->pendingData(),
+                'requires_review' => true
+            ]),
+            'escalated' => Mail::to($admin)->send(new EscalatedRequest($ctx)),
+            default => null
+        };
+    });
 ```
 
 ### Multi-Step Context
@@ -455,18 +568,21 @@ Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
 Access previous steps' information:
 
 ```php
-Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
-    // Get all executions for this instance
-    $executions = $ctx->instance->executions;
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Get all executions for this instance
+        $executions = $ctx->instance->executions;
 
-    foreach ($executions as $execution) {
-        Log::info('Step executed', [
-            'step' => $execution->step->name,
-            'decision' => $execution->decision,
-            'duration' => $execution->duration,
-            'by' => $execution->executedBy->name
-        ]);
-    }
+        foreach ($executions as $execution) {
+            Log::info('Step executed', [
+                'step' => $execution->step->name,
+                'decision' => $execution->decision,
+                'duration' => $execution->duration,
+                'by' => $execution->executedBy->name
+            ]);
+        }
 
     // Create the post
     Post::create($ctx->pendingData());
@@ -476,27 +592,33 @@ Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
 ### Notifications
 
 ```php
-Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-    // Notify requester
-    Mail::to($ctx->instance->triggeredBy)->send(
-        new RequestApproved($ctx)
-    );
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Notify requester
+        Mail::to($ctx->instance->triggeredBy)->send(
+            new RequestApproved($ctx)
+        );
 
-    // Notify all approvers
-    foreach ($ctx->instance->executions as $execution) {
-        if ($execution->decision === 'approved') {
-            Mail::to($execution->executedBy)->send(
-                new ThankYouForApproving($ctx)
-            );
+        // Notify all approvers
+        foreach ($ctx->instance->executions as $execution) {
+            if ($execution->decision === 'approved') {
+                Mail::to($execution->executedBy)->send(
+                    new ThankYouForApproving($ctx)
+                );
+            }
         }
-    }
-});
+    });
 
-Dynaflow::onCancel(Post::class, 'update', function (DynaflowContext $ctx) {
-    Mail::to($ctx->instance->triggeredBy)->send(
-        new RequestRejected($ctx)
-    );
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCancelled()
+    ->execute(function (DynaflowContext $ctx) {
+        Mail::to($ctx->instance->triggeredBy)->send(
+            new RequestRejected($ctx)
+        );
+    });
 ```
 
 ## Testing Hooks
@@ -507,9 +629,12 @@ use RSE\DynaFlow\Support\DynaflowContext;
 
 test('completion hook creates post', function () {
     // Register hook
-    Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
-        Post::create($ctx->pendingData());
-    });
+    Dynaflow::builder()
+        ->forWorkflow(Post::class, 'create')
+        ->whenCompleted()
+        ->execute(function (DynaflowContext $ctx) {
+            Post::create($ctx->pendingData());
+        });
 
     // Create instance with mock context
     $instance = DynaflowInstance::factory()->create();

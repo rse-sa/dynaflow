@@ -5,7 +5,6 @@ namespace RSE\DynaFlow\Facades;
 use Closure;
 use Illuminate\Support\Facades\Facade;
 use RSE\DynaFlow\Contracts\ActionHandler;
-use RSE\DynaFlow\Services\DynaflowHookBuilder;
 
 /**
  * @method static void beforeTransitionTo(string $stepIdentifier, Closure $callback)
@@ -24,6 +23,7 @@ use RSE\DynaFlow\Services\DynaflowHookBuilder;
  * @method static void exceptionUsing(Closure $callback)
  * @method static void resolveAssigneesFor(string $topic, string $action, Closure $callback)
  * @method static void resolveAssigneesUsing(Closure $callback)
+ *                                                              above will be deprecated, better to use Builder
  * @method static bool willBypass(string $topic, string $action, mixed $user)
  * @method static void registerAction(string $key, ActionHandler|Closure|string $handler)
  * @method static ActionHandler|null getActionHandler(string $key)

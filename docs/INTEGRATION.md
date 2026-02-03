@@ -286,20 +286,25 @@ The system validates if a user can execute a step by:
 use RSE\DynaFlow\Facades\Dynaflow;
 
 // Scoped to specific workflow
-Dynaflow::authorizeStepFor(Post::class, 'update', function ($step, $user, $instance) {
-    if ($user->hasRole('admin')) {
-        return true;
-    }
-    return null;
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->authorizeStepUsing()
+    ->execute(function ($step, $user, $instance) {
+        if ($user->hasRole('admin')) {
+            return true;
+        }
+        return null;
+    });
 
 // Global authorization (all workflows)
-Dynaflow::authorizeStepUsing(function ($step, $user, $instance) {
-    if ($user->hasRole('super_admin')) {
-        return true;
-    }
-    return null;
-});
+Dynaflow::builder()
+    ->authorizeStepUsing()
+    ->execute(function ($step, $user, $instance) {
+        if ($user->hasRole('super_admin')) {
+            return true;
+        }
+        return null;
+    });
 ```
 
 ## Complete Workflow Example
@@ -533,13 +538,16 @@ Flow: Step 1 → (Step 2 OR Step 3) → Step 4
 Use hooks to conditionally allow transitions:
 
 ```php
-Dynaflow::onTransition('manager_review', 'final_approval', function ($from, $to, $instance, $user) {
-    // Only allow if certain conditions met
-    if ($instance->model->amount > 10000) {
-        return true;  // Allow transition
-    }
-    return false;  // Block transition
-});
+Dynaflow::builder()
+    ->whenTransitioning()
+    ->between('manager_review', 'final_approval')
+    ->execute(function ($from, $to, $instance, $user) {
+        // Only allow if certain conditions met
+        if ($instance->model->amount > 10000) {
+            return true;  // Allow transition
+        }
+        return false;  // Block transition
+    });
 ```
 
 ## User Exceptions (Bypass Workflows)
@@ -569,15 +577,22 @@ DynaflowException::create([
 Or use custom logic:
 
 ```php
+use RSE\DynaFlow\Facades\Dynaflow;
+
 // Scoped to specific workflow
-Dynaflow::exceptionFor(Post::class, 'update', function ($workflow, $user) {
-    return $user->isOwnerOf($workflow->model);
-});
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->resolveExceptionUsing()
+    ->execute(function ($workflow, $user) {
+        return $user->isOwnerOf($workflow->model);
+    });
 
 // Global exception (all workflows)
-Dynaflow::exceptionUsing(function ($workflow, $user) {
-    return $user->hasRole('super_admin');
-});
+Dynaflow::builder()
+    ->resolveExceptionUsing()
+    ->execute(function ($workflow, $user) {
+        return $user->hasRole('super_admin');
+    });
 ```
 
 ## Next Steps

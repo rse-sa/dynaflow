@@ -25,7 +25,7 @@ trait UsesDynaflow
      * - Either execute the completion hook directly OR trigger a workflow
      *
      * IMPORTANT: You must register completion hooks using:
-     * Dynaflow::onComplete($topic, $action, function($instance, $user) { ... })
+     * Dynaflow::builder()->forWorkflow($topic, $action)->whenCompleted()->execute(function($instance, $user) { ... })
      *
      * @param  string  $topic  The topic (usually model class, e.g., Post::class)
      * @param  string  $action  The action (e.g., 'create', 'update', 'delete', 'approve', 'publish', etc.)
