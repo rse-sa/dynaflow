@@ -11,10 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('dynaflows', function (Blueprint $table) {
-            $table->json('data')->nullable()->after('ignored_fields');
-            $table->json('metadata')->nullable()->after('metadata');
-        });
+        if (! Schema::hasColumn('dynaflows', 'data')) {
+            Schema::table('dynaflows', function (Blueprint $table) {
+                $table->json('data')->nullable()->after('ignored_fields');
+            });
+        }
+
+        if (! Schema::hasColumn('dynaflows', 'metadata')) {
+            Schema::table('dynaflows', function (Blueprint $table) {
+                $table->json('metadata')->nullable()->after('data');
+            });
+        }
     }
 
     /**
