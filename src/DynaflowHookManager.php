@@ -8,11 +8,40 @@ use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
 use RSE\DynaFlow\Services\ActionHandlerRegistry;
+use RSE\DynaFlow\Services\CallbackInvoker;
+use RSE\DynaFlow\Services\DynaflowHookBuilder;
 use RSE\DynaFlow\Services\DynaflowValidator;
 use RSE\DynaFlow\Support\DynaflowContext;
 
 class DynaflowHookManager
 {
+    protected CallbackInvoker $invoker;
+
+    public function __construct(?CallbackInvoker $invoker = null)
+    {
+        $this->invoker = $invoker ?? new CallbackInvoker;
+    }
+
+    /**
+     * Get a fluent hook builder interface.
+     */
+    public function builder(): DynaflowHookBuilder
+    {
+        return new DynaflowHookBuilder($this);
+    }
+
+    /**
+     * Scope hooks to a specific workflow.
+     *
+     * @param  string  $topic  The topic (e.g., Post::class)
+     * @param  string  $action  The action (e.g., 'create', 'update')
+     * @return $this
+     */
+    public function forWorkflow(string $topic, string $action): DynaflowHookBuilder
+    {
+        return $this->builder()->forWorkflow($topic, $action);
+    }
+
     protected array $beforeTransitionToHooks = [];
 
     protected array $afterTransitionToHooks = [];
@@ -29,13 +58,11 @@ class DynaflowHookManager
 
     protected array $stepActivatedHooks = [];
 
-    protected ?Closure $authorizationResolver = null;
+    protected array $authorizationResolvers = [];
 
-    protected ?Closure $exceptionResolver = null;
+    protected array $exceptionResolvers = [];
 
-    protected ?Closure $assigneeResolver = null;
-
-    protected array $workflowAuthorizers = [];
+    protected array $assigneeResolvers = [];
 
     protected array $scripts = [];
 
@@ -77,8 +104,8 @@ class DynaflowHookManager
      * The callback receives: (DynaflowContext $context)
      * The callback should perform the final action (create/update/delete/approve/etc)
      *
-     * @param  string  $topic  The topic (e.g., Post::class or 'PostPublishing')
-     * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
+     * @param  string|array  $topic  The topic (e.g., Post::class or 'PostPublishing')
+     * @param  string|array  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
      * @param  Closure  $callback  The callback to execute
      */
     public function onComplete(string|array $topic, string|array $action, Closure $callback): void
@@ -100,8 +127,8 @@ class DynaflowHookManager
      * The callback receives: (DynaflowContext $context)
      * Use this to clean up, notify users, or perform rollback actions
      *
-     * @param  string  $topic  The topic (e.g., Post::class or 'PostPublishing')
-     * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
+     * @param  string|array  $topic  The topic (e.g., Post::class or 'PostPublishing')
+     * @param  string|array  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
      * @param  Closure  $callback  The callback to execute
      */
     public function onCancel(string|array $topic, string|array $action, Closure $callback): void
@@ -129,8 +156,8 @@ class DynaflowHookManager
      * - Apply custom business logic for skipping workflows
      * - Conditionally bypass workflows based on data
      *
-     * @param  string  $topic  The topic (e.g., Post::class or 'PostPublishing')
-     * @param  string  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
+     * @param  string|array  $topic  The topic (e.g., Post::class or 'PostPublishing')
+     * @param  string|array  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
      * @param  Closure  $callback  The callback to execute
      */
     public function beforeTrigger(string|array $topic, string|array $action, Closure $callback): void
@@ -158,7 +185,25 @@ class DynaflowHookManager
     }
 
     /**
-     * Register a hook to execute when a step becomes active (current step).
+     * Register a scoped hook for when a step becomes active in a specific workflow.
+     *
+     * @param  string  $topic  The topic (e.g., Post::class) or '*'
+     * @param  string  $action  The action (e.g., 'update') or '*'
+     * @param  string|array  $stepIdentifier  Step ID, key, or '*' for all steps
+     * @param  Closure  $callback  Receives flexible parameters
+     */
+    public function onStepActivatedFor(string $topic, string $action, string|array $stepIdentifier, Closure $callback): void
+    {
+        $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
+
+        foreach ($identifiers as $identifier) {
+            $key                                     = "$topic::$action::$identifier";
+            $this->stepActivatedHooks[$key][]        = $callback;
+        }
+    }
+
+    /**
+     * Register a global hook for when a step becomes active (shortcut for onStepActivatedFor('*', '*', ...)).
      *
      * This hook is triggered when an instance moves to a new step, including:
      * - After workflow trigger (first step)
@@ -170,31 +215,146 @@ class DynaflowHookManager
      * - Notifying step assignees
      * - Starting timers or SLAs
      *
-     * @param  string  $stepIdentifier  Step ID, key, or '*' for all steps
-     * @param  Closure  $callback  Receives (DynaflowInstance $instance, DynaflowStep $step, mixed $user)
+     * @param  string|array  $stepIdentifier  Step ID, key, or '*' for all steps
+     * @param  Closure  $callback  Receives flexible parameters
      */
     public function onStepActivated(string|array $stepIdentifier, Closure $callback): void
     {
-        $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
-
-        foreach ($identifiers as $identifier) {
-            $this->stepActivatedHooks[$identifier][] = $callback;
-        }
+        $this->onStepActivatedFor('*', '*', $stepIdentifier, $callback);
     }
 
+    /**
+     * Register a scoped authorization resolver for specific workflows.
+     *
+     * @param  string  $topic  The topic (e.g., Post::class or custom string) or '*'
+     * @param  string  $action  The action (e.g., 'create', 'update') or '*'
+     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): ?bool
+     */
+    public function authorizeStepFor(string $topic, string $action, Closure $callback): void
+    {
+        $key                                   = "$topic::$action";
+        $this->authorizationResolvers[$key]    = $callback;
+    }
+
+    /**
+     * Register a scoped exception resolver for specific workflows.
+     *
+     * @param  string  $topic  The topic or '*'
+     * @param  string  $action  The action or '*'
+     * @param  Closure  $callback  fn(Dynaflow $workflow, $user): ?bool
+     */
+    public function exceptionFor(string $topic, string $action, Closure $callback): void
+    {
+        $key                            = "$topic::$action";
+        $this->exceptionResolvers[$key] = $callback;
+    }
+
+    /**
+     * Register a scoped assignee resolver for specific workflows.
+     *
+     * @param  string  $topic  The topic or '*'
+     * @param  string  $action  The action or '*'
+     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): array
+     */
+    public function resolveAssigneesFor(string $topic, string $action, Closure $callback): void
+    {
+        $key                           = "$topic::$action";
+        $this->assigneeResolvers[$key] = $callback;
+    }
+
+    /**
+     * Register a global authorization resolver (shortcut for authorizeStepFor('*', '*', ...)).
+     *
+     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): ?bool
+     */
     public function authorizeStepUsing(Closure $callback): void
     {
-        $this->authorizationResolver = $callback;
+        $this->authorizeStepFor('*', '*', $callback);
     }
 
+    /**
+     * Register a global exception resolver (shortcut for exceptionFor('*', '*', ...)).
+     *
+     * @param  Closure  $callback  fn(Dynaflow $workflow, $user): ?bool
+     */
     public function exceptionUsing(Closure $callback): void
     {
-        $this->exceptionResolver = $callback;
+        $this->exceptionFor('*', '*', $callback);
     }
 
+    /**
+     * Register a global assignee resolver (shortcut for resolveAssigneesFor('*', '*', ...)).
+     *
+     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): array
+     */
     public function resolveAssigneesUsing(Closure $callback): void
     {
-        $this->assigneeResolver = $callback;
+        $this->resolveAssigneesFor('*', '*', $callback);
+    }
+
+    /**
+     * Build available parameters from DynaflowContext for callback invocation.
+     *
+     * @param  DynaflowContext  $ctx  The workflow context
+     * @return array Available parameters
+     */
+    private function buildContextParameters(DynaflowContext $ctx): array
+    {
+        return [
+            'ctx'         => $ctx,
+            'context'     => $ctx,
+            'instance'    => $ctx->instance,
+            'sourceStep'  => $ctx->sourceStep,
+            'targetStep'  => $ctx->targetStep,
+            'step'        => $ctx->targetStep,
+            'decision'    => $ctx->decision,
+            'user'        => $ctx->user,
+            'execution'   => $ctx->execution,
+            'notes'       => $ctx->notes,
+            'model'       => $ctx->model(),
+            'data'        => $ctx->pendingData(),
+            'workflow'    => $ctx->instance->dynaflow,
+        ];
+    }
+
+    /**
+     * Get resolver keys in priority order (most specific to least specific).
+     *
+     * @param  string  $topic  The workflow topic
+     * @param  string  $action  The workflow action
+     * @return array<string> Keys in priority order
+     */
+    private function getResolverKeys(string $topic, string $action): array
+    {
+        return [
+            "$topic::$action",  // Exact match
+            "$topic::*",        // Topic wildcard
+            "*::$action",       // Action wildcard
+            '*::*',             // Global wildcard
+        ];
+    }
+
+    /**
+     * Resolve from resolvers array with priority.
+     *
+     * @param  array  $resolvers  The resolvers array
+     * @param  string  $topic  The workflow topic
+     * @param  string  $action  The workflow action
+     * @param  array  $available  Available parameters for resolver
+     * @return mixed The first non-null result or null
+     */
+    private function resolveFromResolvers(array $resolvers, string $topic, string $action, array $available): mixed
+    {
+        foreach ($this->getResolverKeys($topic, $action) as $key) {
+            if (isset($resolvers[$key])) {
+                $result = $this->invoker->invoke($resolvers[$key], $available);
+                if ($result !== null) {
+                    return $result;
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -214,8 +374,10 @@ class DynaflowHookManager
             $this->beforeTransitionToHooks[$step->dynaflow->action . ':' . $step->key] ?? [],
         );
 
+        $available = $this->buildContextParameters($ctx);
+
         foreach ($hooks as $hook) {
-            $result = $hook($ctx);
+            $result = $this->invoker->invoke($hook, $available);
             if ($result === false) {
                 return false;
             }
@@ -240,8 +402,10 @@ class DynaflowHookManager
             $this->afterTransitionToHooks[$step->dynaflow->action . ':' . $step->key] ?? [],
         );
 
+        $available = $this->buildContextParameters($ctx);
+
         foreach ($hooks as $hook) {
-            $hook($ctx);
+            $this->invoker->invoke($hook, $available);
         }
     }
 
@@ -274,13 +438,15 @@ class DynaflowHookManager
             $fromLongKey . '::' . $toLongKey,
         ];
 
+        $available = $this->buildContextParameters($ctx);
+
         foreach ($keys as $key) {
             if (! isset($this->transitionHooks[$key])) {
                 continue;
             }
 
             foreach ($this->transitionHooks[$key] as $hook) {
-                $result = $hook($ctx);
+                $result = $this->invoker->invoke($hook, $available);
                 if ($result === false) {
                     return false;
                 }
@@ -290,46 +456,81 @@ class DynaflowHookManager
         return true;
     }
 
-    public function resolveAuthorization(DynaflowStep $step, $user): ?bool
+    public function resolveAuthorization(DynaflowStep $step, $user, ?DynaflowInstance $instance = null): ?bool
     {
-        if ($this->authorizationResolver === null) {
-            return null;
-        }
+        $topic  = $step->dynaflow->topic;
+        $action = $step->dynaflow->action;
 
-        return ($this->authorizationResolver)($step, $user);
+        $available = [
+            'step'     => $step,
+            'user'     => $user,
+            'instance' => $instance,
+            'workflow' => $step->dynaflow,
+            'model'    => $instance?->model,
+        ];
+
+        return $this->resolveFromResolvers(
+            $this->authorizationResolvers,
+            $topic,
+            $action,
+            $available
+        );
     }
 
     public function resolveException(Dynaflow $workflow, $user): ?bool
     {
-        if ($this->exceptionResolver === null) {
-            return null;
-        }
+        $topic  = $workflow->topic;
+        $action = $workflow->action;
 
-        return ($this->exceptionResolver)($workflow, $user);
+        $available = [
+            'workflow' => $workflow,
+            'user'     => $user,
+        ];
+
+        return $this->resolveFromResolvers(
+            $this->exceptionResolvers,
+            $topic,
+            $action,
+            $available
+        );
     }
 
-    public function resolveAssignees(DynaflowStep $step, $user): array
+    public function resolveAssignees(DynaflowStep $step, $user, ?DynaflowInstance $instance = null): array
     {
-        if ($this->assigneeResolver === null) {
-            return [];
-        }
+        $topic  = $step->dynaflow->topic;
+        $action = $step->dynaflow->action;
 
-        return ($this->assigneeResolver)($step, $user);
+        $available = [
+            'step'     => $step,
+            'user'     => $user,
+            'instance' => $instance,
+            'workflow' => $step->dynaflow,
+            'model'    => $instance?->model,
+        ];
+
+        $result = $this->resolveFromResolvers(
+            $this->assigneeResolvers,
+            $topic,
+            $action,
+            $available
+        );
+
+        return $result ?? [];
     }
 
     public function hasAuthorizationResolver(): bool
     {
-        return $this->authorizationResolver !== null;
+        return ! empty($this->authorizationResolvers);
     }
 
     public function hasExceptionResolver(): bool
     {
-        return $this->exceptionResolver !== null;
+        return ! empty($this->exceptionResolvers);
     }
 
     public function hasAssigneeResolver(): bool
     {
-        return $this->assigneeResolver !== null;
+        return ! empty($this->assigneeResolvers);
     }
 
     /**
@@ -350,8 +551,10 @@ class DynaflowHookManager
             $this->completeHooks[$key] ?? []
         );
 
+        $available = $this->buildContextParameters($ctx);
+
         foreach ($hooks as $hook) {
-            $hook($ctx);
+            $this->invoker->invoke($hook, $available);
         }
     }
 
@@ -373,8 +576,10 @@ class DynaflowHookManager
             $this->cancelHooks[$key] ?? []
         );
 
+        $available = $this->buildContextParameters($ctx);
+
         foreach ($hooks as $hook) {
-            $hook($ctx);
+            $this->invoker->invoke($hook, $available);
         }
     }
 
@@ -400,17 +605,47 @@ class DynaflowHookManager
     public function runStepActivatedHooks(DynaflowInstance $instance, DynaflowStep $step, mixed $user): void
     {
         $workflow = $instance->dynaflow;
-        $longKey  = $workflow->action . ':' . $step->key;
+        $topic    = $workflow->topic;
+        $action   = $workflow->action;
+        $longKey  = $action . ':' . $step->key;
 
-        $hooks = array_merge(
-            $this->stepActivatedHooks['*'] ?? [],
-            $this->stepActivatedHooks[$step->id] ?? [],
-            $this->stepActivatedHooks[$step->key] ?? [],
-            $this->stepActivatedHooks[$longKey] ?? []
-        );
+        // Build keys with scoping priority: topic::action::step > topic::*::step > *::action::step > *::*::step
+        $keys = [
+            "$topic::$action::$step->id",
+            "$topic::$action::$step->key",
+            "$topic::$action::$longKey",
+            "$topic::$action::*",
+            "$topic::*::$step->id",
+            "$topic::*::$step->key",
+            "$topic::*::$longKey",
+            "$topic::*::*",
+            "*::$action::$step->id",
+            "*::$action::$step->key",
+            "*::$action::$longKey",
+            "*::$action::*",
+            "*::*::$step->id",
+            "*::*::$step->key",
+            "*::*::$longKey",
+            '*::*::*',
+        ];
+
+        $hooks = [];
+        foreach ($keys as $key) {
+            if (isset($this->stepActivatedHooks[$key])) {
+                $hooks = array_merge($hooks, $this->stepActivatedHooks[$key]);
+            }
+        }
+
+        $available = [
+            'instance' => $instance,
+            'step'     => $step,
+            'workflow' => $workflow,
+            'user'     => $user,
+            'model'    => $instance->model,
+        ];
 
         foreach ($hooks as $hook) {
-            $hook($instance, $step, $user);
+            $this->invoker->invoke($hook, $available);
         }
     }
 
@@ -432,8 +667,15 @@ class DynaflowHookManager
             $this->beforeTriggerHooks[$key] ?? []
         );
 
+        $available = [
+            'workflow' => $workflow,
+            'model'    => $model,
+            'data'     => $data,
+            'user'     => $user,
+        ];
+
         foreach ($hooks as $hook) {
-            $result = $hook($workflow, $model, $data, $user);
+            $result = $this->invoker->invoke($hook, $available);
             if ($result === false) {
                 return false; // Skip workflow
             }
@@ -458,19 +700,28 @@ class DynaflowHookManager
             $this->afterTriggerHooks[$key] ?? []
         );
 
+        $available = [
+            'workflow' => $workflow,
+            'instance' => $instance,
+            'model'    => $model,
+            'user'     => $user,
+        ];
+
         foreach ($hooks as $hook) {
-            $hook($workflow, $instance, $model, $user);
+            $this->invoker->invoke($hook, $available);
         }
     }
 
     /**
-     * Register per-workflow authorization resolver
-     * Takes precedence over global authorizeStepUsing
+     * Alias for authorizeStepFor() - register per-workflow authorization resolver.
+     *
+     * @param  string  $topic  The topic or '*'
+     * @param  string  $action  The action or '*'
+     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): ?bool
      */
     public function authorizeWorkflowStepUsing(string $topic, string $action, Closure $callback): void
     {
-        $key                               = "$topic::$action";
-        $this->workflowAuthorizers[$key]   = $callback;
+        $this->authorizeStepFor($topic, $action, $callback);
     }
 
     /**
@@ -478,7 +729,7 @@ class DynaflowHookManager
      */
     public function hasWorkflowAuthorizer(string $key): bool
     {
-        return isset($this->workflowAuthorizers[$key]);
+        return isset($this->authorizationResolvers[$key]);
     }
 
     /**
@@ -486,11 +737,19 @@ class DynaflowHookManager
      */
     public function resolveWorkflowAuthorization(string $key, DynaflowStep $step, mixed $user, DynaflowInstance $instance): ?bool
     {
-        if (! isset($this->workflowAuthorizers[$key])) {
+        if (! isset($this->authorizationResolvers[$key])) {
             return null;
         }
 
-        return $this->workflowAuthorizers[$key]($step, $user, $instance);
+        $available = [
+            'step'     => $step,
+            'user'     => $user,
+            'instance' => $instance,
+            'workflow' => $step->dynaflow,
+            'model'    => $instance->model,
+        ];
+
+        return $this->invoker->invoke($this->authorizationResolvers[$key], $available);
     }
 
     /**

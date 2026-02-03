@@ -379,11 +379,13 @@ $changedFields = $post->getChangedFields();
 
 ### Custom Authorization Logic
 
+Scoped by workflow (recommended):
+
 ```php
 use RSE\DynaFlow\Facades\Dynaflow;
 
-Dynaflow::authorizeStepUsing(function ($step, $user) {
-    // Custom logic
+// Specific workflow
+Dynaflow::authorizeStepFor(Post::class, 'update', function ($step, $user, $instance) {
     if ($user->hasRole('admin')) {
         return true;
     }
@@ -392,7 +394,27 @@ Dynaflow::authorizeStepUsing(function ($step, $user) {
         return true;
     }
 
-    // Return null to fall back to assignee check
+    // Return null to fall back to next resolver
+    return null;
+});
+
+// All workflows (wildcard)
+Dynaflow::authorizeStepFor('*', '*', function ($step, $user, $instance) {
+    if ($user->hasRole('super_admin')) {
+        return true;
+    }
+    return null;
+});
+```
+
+Shortcut for global authorization:
+
+```php
+// Equivalent to authorizeStepFor('*', '*', ...)
+Dynaflow::authorizeStepUsing(function ($step, $user, $instance) {
+    if ($user->hasRole('admin')) {
+        return true;
+    }
     return null;
 });
 ```
@@ -475,26 +497,28 @@ if (Dynaflow::willBypass(Post::class, 'update', $user)) {
 }
 ```
 
-### Per-Workflow Authorization
+### Wildcard Support
 
-Set custom authorization for specific workflows (takes precedence over global):
+All authorization resolvers support wildcards:
 
 ```php
-Dynaflow::authorizeWorkflowStepUsing(Post::class, 'update', function ($step, $user, $instance) {
-    // Custom logic for this specific workflow
-    if ($step->key === 'manager_review') {
-        return $user->isManagerOf($instance->model);
-    }
+// All actions for Post workflows
+Dynaflow::authorizeStepFor(Post::class, '*', function ($step, $user, $instance) {
+    return $user->canAccessPost($instance->model);
+});
 
-    // Return null to fall back to global/database check
-    return null;
+// All topics for 'publish' action
+Dynaflow::authorizeStepFor('*', 'publish', function ($step, $user, $instance) {
+    return $user->hasRole('publisher');
 });
 ```
 
-**Authorization Priority:**
-1. Per-workflow authorizer (highest)
-2. Global authorizer (`authorizeStepUsing`)
-3. Database assignees (lowest)
+**Authorization Priority (most specific wins):**
+1. `Topic::action` (exact match - highest)
+2. `Topic::*` (topic wildcard)
+3. `*::action` (action wildcard)
+4. `*::*` (global wildcard)
+5. Database assignees (lowest)
 
 ### Hook Execution During Bypass
 

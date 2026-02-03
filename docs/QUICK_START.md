@@ -18,25 +18,27 @@ Define what happens when workflows complete. Add to `AppServiceProvider`:
 
 ```php
 use RSE\DynaFlow\Facades\Dynaflow;
-use RSE\DynaFlow\Support\DynaflowContext;
 use App\Models\Post;
 
 public function boot()
 {
-    Dynaflow::onComplete(Post::class, 'create', function (DynaflowContext $ctx) {
-        $post = Post::create($ctx->pendingData());
-        $ctx->instance->update(['model_id' => $post->id]);
+    // Flexible parameters - use what you need, in any order!
+    Dynaflow::onComplete(Post::class, 'create', function (array $data, $instance) {
+        $post = Post::create($data);
+        $instance->update(['model_id' => $post->id]);
     });
 
-    Dynaflow::onComplete(Post::class, 'update', function (DynaflowContext $ctx) {
-        $ctx->model()->update($ctx->pendingData());
+    Dynaflow::onComplete(Post::class, 'update', function (Post $model, array $data) {
+        $model->update($data);
     });
 
-    Dynaflow::onComplete(Post::class, 'delete', function (DynaflowContext $ctx) {
-        $ctx->model()->delete();
+    Dynaflow::onComplete(Post::class, 'delete', function (Post $model) {
+        $model->delete();
     });
 }
 ```
+
+**Note:** Callbacks support flexible dependency injection - parameters resolved by type hint, name, or position. See [HOOKS.md](HOOKS.md) for details.
 
 ### Step 2: Add Trait to Model (Optional)
 

@@ -6,7 +6,7 @@ Complete guide for integrating Dynaflow into your Laravel application.
 > - Use `transitionTo()` to advance workflows
 > - Use `cancelWorkflow()` for rejections/cancellations
 > - Decision is a freeform string (not enum)
-> - All hooks receive `DynaflowContext` parameter
+> - **Hooks support flexible parameters** - use type hints, parameter names, or positions
 > - See [HOOKS.md](HOOKS.md) for complete hook documentation
 
 ## Controller Integration
@@ -285,13 +285,19 @@ The system validates if a user can execute a step by:
 // Custom authorization
 use RSE\DynaFlow\Facades\Dynaflow;
 
-Dynaflow::authorizeStepUsing(function ($step, $user) {
-    // Example: Allow admins to execute any step
+// Scoped to specific workflow
+Dynaflow::authorizeStepFor(Post::class, 'update', function ($step, $user, $instance) {
     if ($user->hasRole('admin')) {
         return true;
     }
+    return null;
+});
 
-    // Fall back to default assignee check
+// Global authorization (all workflows)
+Dynaflow::authorizeStepUsing(function ($step, $user, $instance) {
+    if ($user->hasRole('super_admin')) {
+        return true;
+    }
     return null;
 });
 ```
@@ -563,6 +569,12 @@ DynaflowException::create([
 Or use custom logic:
 
 ```php
+// Scoped to specific workflow
+Dynaflow::exceptionFor(Post::class, 'update', function ($workflow, $user) {
+    return $user->isOwnerOf($workflow->model);
+});
+
+// Global exception (all workflows)
 Dynaflow::exceptionUsing(function ($workflow, $user) {
     return $user->hasRole('super_admin');
 });

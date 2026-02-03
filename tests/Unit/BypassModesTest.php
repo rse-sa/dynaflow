@@ -589,12 +589,12 @@ class BypassModesTest extends TestCase
         $step     = $workflow->steps()->first();
 
         // Global authorization - would deny
-        Dynaflow::authorizeStepUsing(function () {
+        Dynaflow::authorizeStepFor('*', '*', function () {
             return false;
         });
 
         // Per-workflow authorization - allows
-        Dynaflow::authorizeWorkflowStepUsing(Post::class, 'update', function () {
+        Dynaflow::authorizeStepFor(Post::class, 'update', function () {
             return true;
         });
 

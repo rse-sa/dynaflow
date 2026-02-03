@@ -12,6 +12,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use RSE\DynaFlow\Database\Factories\DynaflowInstanceFactory;
 
+/**
+ * @property \Illuminate\Contracts\Auth\Authenticatable|\App\Models\User $triggeredBy
+ */
 #[UseFactory(DynaflowInstanceFactory::class)]
 class DynaflowInstance extends Model
 {
@@ -24,6 +27,8 @@ class DynaflowInstance extends Model
         'status',
         'triggered_by_type',
         'triggered_by_id',
+        'data',
+        'metadata',
         'current_step_id',
         'step_started_at',
         'completed_at',
@@ -31,6 +36,8 @@ class DynaflowInstance extends Model
     ];
 
     protected $casts = [
+        'data'            => 'json',
+        'metadata'        => 'json',
         'step_started_at' => 'datetime',
         'completed_at'    => 'datetime',
         'cancelled_at'    => 'datetime',

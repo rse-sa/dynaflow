@@ -129,7 +129,7 @@ class DynaflowHookManagerTest extends TestCase
 
     public function test_can_register_authorization_resolver()
     {
-        $this->hookManager->authorizeStepUsing(function ($step, $user) {
+        $this->hookManager->authorizeStepFor('*', '*', function ($step, $user) {
             return $user->getKey() === 1;
         });
 
@@ -143,7 +143,7 @@ class DynaflowHookManagerTest extends TestCase
 
     public function test_can_register_exception_resolver()
     {
-        $this->hookManager->exceptionUsing(function ($dynaflow, $user) {
+        $this->hookManager->exceptionFor('*', '*', function ($dynaflow, $user) {
             return $user->getKey() === 1;
         });
 
@@ -157,7 +157,7 @@ class DynaflowHookManagerTest extends TestCase
 
     public function test_can_register_assignee_resolver()
     {
-        $this->hookManager->resolveAssigneesUsing(function ($step, $user) {
+        $this->hookManager->resolveAssigneesFor('*', '*', function ($step, $user) {
             return [1, 2, 3];
         });
 

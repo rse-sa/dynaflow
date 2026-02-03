@@ -2,6 +2,65 @@
 
 Dynaflow hooks define what happens when workflows complete, are cancelled, or transition between steps.
 
+## Flexible Callback Parameters
+
+**All hooks support flexible dependency injection** - parameters resolved by type hint, name, or position.
+
+### Resolution Priority
+
+1. **Type hint** (instanceof check) - highest priority
+2. **Parameter name** (key match)
+3. **Positional** (numeric index - backwards compatibility)
+4. **Default value**
+5. **Nullable** (return null)
+6. **Exception** (if unresolvable)
+
+### Examples
+
+```php
+// Type hint matching - any order works
+Dynaflow::onComplete(Post::class, 'update', function (Post $model, array $data) {
+    $model->update($data);
+});
+
+// Parameter name matching (no type hint needed)
+Dynaflow::beforeTrigger(Post::class, 'update', function ($data, $user) {
+    // Resolved by parameter names
+});
+
+// Mixed - type hint + parameter name
+Dynaflow::afterTransitionTo('review', function (User $user, $decision) {
+    Log::info("{$user->name} decided: {$decision}");
+});
+
+// Only use what you need (other params ignored)
+Dynaflow::onComplete(Post::class, 'update', function (Post $post) {
+    $post->publish();
+});
+
+// Backward compatible - positional still works
+Dynaflow::onComplete(Post::class, 'update', function ($ctx) {
+    $ctx->model()->update($ctx->pendingData());
+});
+```
+
+### Available Parameters by Hook Type
+
+| Hook Type | Available Parameters |
+|-----------|---------------------|
+| onComplete, onCancel, beforeTransitionTo, afterTransitionTo, onTransition | `ctx`, `context`, `instance`, `sourceStep`, `targetStep`, `step`, `decision`, `user`, `execution`, `notes`, `model`, `data`, `workflow` |
+| beforeTrigger | `workflow`, `model`, `data`, `user` |
+| afterTrigger | `workflow`, `instance`, `model`, `user` |
+| onStepActivated | `instance`, `step`, `workflow`, `user`, `model` |
+
+**Type hints always match first:**
+```php
+// Post model resolved by type, even if parameter name is different
+Dynaflow::onComplete(Post::class, 'update', function (Post $entity) {
+    // $entity gets the Post model instance
+});
+```
+
 ## Hook Types
 
 ### Completion Hooks
@@ -130,18 +189,31 @@ Dynaflow::onTransition('manager_review', '*', function (DynaflowContext $ctx) {
 
 Run when a step becomes the current step (after workflow trigger or transition).
 
+**Scoped by workflow (recommended):**
 ```php
-Dynaflow::onStepActivated('manager_review', function ($instance, $step, $user) {
-    // Notify step assignees
+// Specific workflow and step
+Dynaflow::onStepActivatedFor(Post::class, 'update', 'manager_review', function (Post $model, User $user) {
+    // Only for Post update workflows, manager_review step
+    Mail::to($user)->send(new ReviewRequired($model));
+});
+
+// All steps in a specific workflow
+Dynaflow::onStepActivatedFor(Post::class, 'update', '*', function (Post $model, $step) {
+    Log::info("Post update step activated", ['step' => $step->key, 'post' => $model->id]);
+});
+
+// Specific step across all workflows
+Dynaflow::onStepActivatedFor('*', '*', 'manager_review', function ($instance, $step, $user) {
+    // Notify assignees for manager_review step in any workflow
     $assignees = $step->assignees()->with('assignable')->get();
     Notification::send($assignees->pluck('assignable'), new StepPendingNotification($instance));
 });
+```
 
-// For all steps
-Dynaflow::onStepActivated('*', function ($instance, $step, $user) {
-    // Log step activation
-    Log::info("Step activated: {$step->key}", ['instance' => $instance->id]);
-
+**Global shortcut (all workflows):**
+```php
+// Global - all steps in all workflows
+Dynaflow::onStepActivated('*', function ($instance, $step) {
     // Start SLA timer
     $instance->update(['step_started_at' => now()]);
 });
@@ -151,6 +223,7 @@ Dynaflow::onStepActivated('*', function ($instance, $step, $user) {
 - Notify step assignees
 - Start SLA timers
 - Log step transitions
+- Trigger workflow-specific automations
 - Trigger external integrations
 
 ## Registering Hooks

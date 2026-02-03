@@ -86,6 +86,18 @@ class DynaflowContext
     }
 
     /**
+     * Get workflow instance metadata
+     */
+    public function meta(?string $key = null): string|array|null
+    {
+        if(empty($key)){
+            return $this->instance->metadata;
+        }
+
+        return $this->instance->metadata[$key] ?? null;
+    }
+
+    /**
      * Get transition duration in seconds
      */
     public function duration(): ?int

@@ -11,8 +11,9 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::table('dynaflow_instances', function (Blueprint $table) {
-            $table->json('metadata')->nullable()->after('current_step_id');
+        Schema::table('dynaflows', function (Blueprint $table) {
+            $table->json('data')->nullable()->after('ignored_fields');
+            $table->json('metadata')->nullable()->after('metadata');
         });
     }
 
@@ -21,8 +22,8 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::table('dynaflow_instances', function (Blueprint $table) {
-            $table->dropColumn('metadata');
+        Schema::table('dynaflows', function (Blueprint $table) {
+            $table->dropColumn(['data', 'metadata']);
         });
     }
 };

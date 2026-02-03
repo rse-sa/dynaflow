@@ -5,6 +5,7 @@ namespace RSE\DynaFlow\Facades;
 use Closure;
 use Illuminate\Support\Facades\Facade;
 use RSE\DynaFlow\Contracts\ActionHandler;
+use RSE\DynaFlow\Services\DynaflowHookBuilder;
 
 /**
  * @method static void beforeTransitionTo(string $stepIdentifier, Closure $callback)
@@ -14,10 +15,14 @@ use RSE\DynaFlow\Contracts\ActionHandler;
  * @method static void onCancel(string $topic, string $action, Closure $callback)
  * @method static void beforeTrigger(string $topic, string $action, Closure $callback)
  * @method static void afterTrigger(string $topic, string $action, Closure $callback)
+ * @method static void onStepActivatedFor(string $topic, string $action, string $stepIdentifier, Closure $callback)
  * @method static void onStepActivated(string $stepIdentifier, Closure $callback)
+ * @method static void authorizeStepFor(string $topic, string $action, Closure $callback)
  * @method static void authorizeStepUsing(Closure $callback)
  * @method static void authorizeWorkflowStepUsing(string $topic, string $action, Closure $callback)
+ * @method static void exceptionFor(string $topic, string $action, Closure $callback)
  * @method static void exceptionUsing(Closure $callback)
+ * @method static void resolveAssigneesFor(string $topic, string $action, Closure $callback)
  * @method static void resolveAssigneesUsing(Closure $callback)
  * @method static bool willBypass(string $topic, string $action, mixed $user)
  * @method static void registerAction(string $key, ActionHandler|Closure|string $handler)
@@ -28,6 +33,8 @@ use RSE\DynaFlow\Contracts\ActionHandler;
  * @method static void registerAIResolver(string $provider, Closure|string $resolver)
  * @method static Closure|object|null getAIResolver(string $provider)
  * @method static bool hasAIResolver(string $provider)
+ * @method static \RSE\DynaFlow\Services\DynaflowHookBuilder builder()
+ * @method static \RSE\DynaFlow\Services\DynaflowHookBuilder forWorkflow(string $topic, string $action)
  *
  * @see \RSE\DynaFlow\DynaflowHookManager
  */

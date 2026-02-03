@@ -62,7 +62,7 @@ class DynaflowValidator
 
         // 2. Check global custom resolver
         if ($this->hookManager->hasAuthorizationResolver()) {
-            $customResult = $this->hookManager->resolveAuthorization($step, $user);
+            $customResult = $this->hookManager->resolveAuthorization($step, $user, $instance);
 
             if ($customResult !== null) {
                 return $customResult;
@@ -71,7 +71,7 @@ class DynaflowValidator
 
         // 3. Check database assignees
         $assignees = $this->hookManager->hasAssigneeResolver()
-            ? $this->hookManager->resolveAssignees($step, $user)
+            ? $this->hookManager->resolveAssignees($step, $user, $instance)
             : $step->assignees->pluck('assignable_id')->toArray();
 
         if (empty($assignees)) {

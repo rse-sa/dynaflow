@@ -15,6 +15,7 @@ use RSE\DynaFlow\Actions\ScriptActionHandler;
 use RSE\DynaFlow\Actions\SubWorkflowActionHandler;
 use RSE\DynaFlow\Services\ActionHandlerRegistry;
 use RSE\DynaFlow\Services\AutoStepExecutor;
+use RSE\DynaFlow\Services\CallbackInvoker;
 use RSE\DynaFlow\Services\DynaflowEngine;
 use RSE\DynaFlow\Services\DynaflowStepVisualizer;
 use RSE\DynaFlow\Services\DynaflowValidator;
@@ -28,6 +29,7 @@ class DynaflowServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/dynaflow.php', 'dynaflow');
 
+        $this->app->singleton(CallbackInvoker::class);
         $this->app->singleton(DynaflowHookManager::class);
         $this->app->singleton(DynaflowValidator::class);
         $this->app->singleton(DynaflowEngine::class);
