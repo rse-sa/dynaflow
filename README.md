@@ -15,6 +15,7 @@ A flexible workflow management package for Laravel that adds multi-step approval
 - **Hook-Based** - Define behavior through completion and cancellation hooks
 - **Polymorphic** - Compatible with any Eloquent model
 - **Audit Trail** - Complete execution history with duration tracking
+- **Debug Logging** - Structured `[Dynaflow]` log entries for every engine action via `DYNAFLOW_DEBUG=true`
 
 ## Installation
 
@@ -150,13 +151,47 @@ Use `{{placeholder}}` in action configs:
 - `{{date:format}}` - Current date
 - `{{config:key}}` - Config values
 
+## Debugging
+
+Enable structured debug logging in `.env`:
+
+```env
+DYNAFLOW_DEBUG=true
+DYNAFLOW_LOG_CHANNEL=daily  # optional, defaults to app default channel
+```
+
+Every engine action — trigger, workflow resolution, bypass detection, step activation, transitions, hook invocations, and completion — is logged with `[Dynaflow]` prefix at the `debug` level. See [Extras → Debug Logging](docs/EXTRAS.md#debug-logging) for the full event reference.
+
+## Custom Models
+
+Extend `DynaflowInstance` or `DynaflowData` to add custom relationships to your application models:
+
+```php
+// config/dynaflow.php
+'models' => [
+    'instance' => \App\Models\CustomDynaflowInstance::class,
+    'data' => \App\Models\CustomDynaflowData::class,
+],
+
+// App\Models\CustomDynaflowInstance.php
+class CustomDynaflowInstance extends \RSE\DynaFlow\Models\DynaflowInstance
+{
+    public function comments(): HasMany
+    {
+        return $this->hasMany(WorkflowComment::class, 'dynaflow_instance_id');
+    }
+}
+```
+
+Custom models must extend their base counterparts. This allows IDE autocompletion via `@return class-string<DynaflowInstance>` type hints on the helper functions.
+
 ## Documentation
 
 - **[Quick Start](docs/QUICK_START.md)** - Get started in 5 minutes
 - **[Integration](docs/INTEGRATION.md)** - Controller integration
 - **[Hooks](docs/HOOKS.md)** - Hook registration and patterns
 - **[Action Handlers](docs/ACTION_HANDLERS.md)** - Step types and auto-execution
-- **[Extras](docs/EXTRAS.md)** - Field filtering, drafts, bypass modes
+- **[Extras](docs/EXTRAS.md)** - Field filtering, drafts, bypass modes, debug logging
 
 ## Requirements
 

@@ -5,6 +5,7 @@ namespace RSE\DynaFlow\Models;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use RSE\DynaFlow\Database\Factories\DynaflowDataFactory;
 
 #[UseFactory(DynaflowDataFactory::class)]
 class DynaflowData extends Model
@@ -24,7 +25,7 @@ class DynaflowData extends Model
 
     public function instance(): BelongsTo
     {
-        return $this->belongsTo(DynaflowInstance::class, 'dynaflow_instance_id');
+        return $this->belongsTo(dynaflowInstanceModel(), 'dynaflow_instance_id');
     }
 
     /**

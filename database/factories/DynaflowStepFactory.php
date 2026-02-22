@@ -24,6 +24,7 @@ class DynaflowStepFactory extends Factory
             ],
             'order'    => $this->faker->unique()->numberBetween(1, 1000),
             'is_final' => false,
+            'active'   => true,
         ];
     }
 

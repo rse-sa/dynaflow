@@ -38,6 +38,7 @@ class DynaflowStep extends Model
         'order',
         'is_final',
         'auto_close',
+        'active',
         'workflow_status',
         'metadata',
     ];
@@ -45,6 +46,7 @@ class DynaflowStep extends Model
     protected $casts = [
         'is_final'      => 'boolean',
         'auto_close'    => 'boolean',
+        'active'        => 'boolean',
         'metadata'      => 'array',
         'action_config' => 'array',
     ];
@@ -157,6 +159,15 @@ class DynaflowStep extends Model
     public function isStateful(): bool
     {
         return in_array($this->type, self::STATEFUL_TYPES, true);
+    }
+
+    /**
+     * Check if this step should be automatically skipped (active = false).
+     * The engine will advance to the next allowed transition transparently.
+     */
+    public function isSkippable(): bool
+    {
+        return $this->active === false;
     }
 
     /**

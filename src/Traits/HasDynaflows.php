@@ -3,18 +3,27 @@
 namespace RSE\DynaFlow\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphMany;
-use RSE\DynaFlow\Models\DynaflowInstance;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
+use RSE\DynaFlow\Enums\DynaflowStatus;
 
 trait HasDynaflows
 {
     public function dynaflowInstances(): MorphMany
     {
-        return $this->morphMany(DynaflowInstance::class, 'model');
+        return $this->morphMany(dynaflowInstanceModel(), 'model');
     }
 
     public function pendingDynaflows(): MorphMany
     {
-        return $this->dynaflowInstances()->where('status', 'pending');
+        return $this->dynaflowInstances()->where('status', DynaflowStatus::PENDING->value);
+    }
+
+    public function pendingDynaflow(): MorphOne
+    {
+        return $this
+            ->morphOne(dynaflowInstanceModel(), 'model')
+            ->where('status', DynaflowStatus::PENDING->value)
+            ->latestOfMany();
     }
 
     public function getWithPendingChanges(): array

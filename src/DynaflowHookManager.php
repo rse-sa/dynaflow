@@ -17,9 +17,12 @@ class DynaflowHookManager
 {
     protected CallbackInvoker $invoker;
 
-    public function __construct(?CallbackInvoker $invoker = null)
+    protected DynaflowLogger $logger;
+
+    public function __construct(?CallbackInvoker $invoker = null, ?DynaflowLogger $logger = null)
     {
         $this->invoker = $invoker ?? new CallbackInvoker;
+        $this->logger  = $logger ?? new DynaflowLogger;
     }
 
     /**
@@ -68,7 +71,37 @@ class DynaflowHookManager
 
     protected array $aiResolvers = [];
 
-    public function beforeTransitionTo(string|array $stepIdentifier, Closure $callback): void
+    protected array $workflowResolvers = [];
+
+    /**
+     * Clear all registered hooks and resolvers. Useful for test isolation.
+     */
+    public function reset(): void
+    {
+        $this->beforeTransitionToHooks = [];
+        $this->afterTransitionToHooks  = [];
+        $this->transitionHooks         = [];
+        $this->completeHooks           = [];
+        $this->cancelHooks             = [];
+        $this->beforeTriggerHooks      = [];
+        $this->afterTriggerHooks       = [];
+        $this->stepActivatedHooks      = [];
+        $this->authorizationResolvers  = [];
+        $this->exceptionResolvers      = [];
+        $this->assigneeResolvers       = [];
+        $this->scripts                 = [];
+        $this->aiResolvers             = [];
+        $this->workflowResolvers       = [];
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal push* methods (@internal — called by builder leaf classes)
+    // -------------------------------------------------------------------------
+
+    /**
+     * @internal Use the builder API: Dynaflow::builder()->beforeTransitionTo(...)
+     */
+    public function pushBeforeTransitionToHook(string|array $stepIdentifier, Closure $callback): void
     {
         $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
 
@@ -77,7 +110,10 @@ class DynaflowHookManager
         }
     }
 
-    public function afterTransitionTo(string|array $stepIdentifier, Closure $callback): void
+    /**
+     * @internal Use the builder API: Dynaflow::builder()->afterTransitionTo(...)
+     */
+    public function pushAfterTransitionToHook(string|array $stepIdentifier, Closure $callback): void
     {
         $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
 
@@ -86,7 +122,10 @@ class DynaflowHookManager
         }
     }
 
-    public function onTransition(string|array $from, string|array $to, Closure $callback): void
+    /**
+     * @internal Use the builder API: Dynaflow::builder()->transition()->from(...)->to(...)
+     */
+    public function pushTransitionHook(string|array $from, string|array $to, Closure $callback): void
     {
         $froms = is_array($from) ? $from : [$from];
         $tos   = is_array($to) ? $to : [$to];
@@ -99,197 +138,272 @@ class DynaflowHookManager
     }
 
     /**
-     * Register a hook to execute when a workflow completes successfully.
-     *
-     * The callback receives: (DynaflowContext $context)
-     * The callback should perform the final action (create/update/delete/approve/etc)
-     *
-     * @param  string|array  $topic  The topic (e.g., Post::class or 'PostPublishing')
-     * @param  string|array  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
-     * @param  Closure  $callback  The callback to execute
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->whenCompleted()
      */
-    public function onComplete(string|array $topic, string|array $action, Closure $callback): void
+    public function pushCompleteHook(string|array $topic, string|array $action, Closure $callback): void
     {
         $topics  = is_array($topic) ? $topic : [$topic];
         $actions = is_array($action) ? $action : [$action];
 
         foreach ($topics as $t) {
             foreach ($actions as $a) {
-                $key                         = "$t::$a";
-                $this->completeHooks[$key][] = $callback;
+                $this->completeHooks["$t::$a"][] = $callback;
             }
         }
     }
 
     /**
-     * Register a hook to execute when a workflow is cancelled or rejected.
-     *
-     * The callback receives: (DynaflowContext $context)
-     * Use this to clean up, notify users, or perform rollback actions
-     *
-     * @param  string|array  $topic  The topic (e.g., Post::class or 'PostPublishing')
-     * @param  string|array  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
-     * @param  Closure  $callback  The callback to execute
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->whenCancelled()
      */
-    public function onCancel(string|array $topic, string|array $action, Closure $callback): void
+    public function pushCancelHook(string|array $topic, string|array $action, Closure $callback): void
     {
         $topics  = is_array($topic) ? $topic : [$topic];
         $actions = is_array($action) ? $action : [$action];
 
         foreach ($topics as $t) {
             foreach ($actions as $a) {
-                $key                       = "$t::$a";
-                $this->cancelHooks[$key][] = $callback;
+                $this->cancelHooks["$t::$a"][] = $callback;
             }
         }
     }
 
     /**
-     * Register a hook to execute before triggering a workflow.
-     *
-     * The callback receives: (Dynaflow $workflow, ?Model $model, array $data, $user)
-     * Return FALSE to skip workflow and apply changes directly.
-     * Return TRUE or NULL to continue with workflow.
-     *
-     * Use this to:
-     * - Check specific fields that changed
-     * - Apply custom business logic for skipping workflows
-     * - Conditionally bypass workflows based on data
-     *
-     * @param  string|array  $topic  The topic (e.g., Post::class or 'PostPublishing')
-     * @param  string|array  $action  The action (e.g., 'create', 'update', 'approve', 'publish')
-     * @param  Closure  $callback  The callback to execute
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->beforeTriggering()
      */
-    public function beforeTrigger(string|array $topic, string|array $action, Closure $callback): void
+    public function pushBeforeTriggerHook(string|array $topic, string|array $action, Closure $callback): void
     {
         $topics  = is_array($topic) ? $topic : [$topic];
         $actions = is_array($action) ? $action : [$action];
 
         foreach ($topics as $t) {
             foreach ($actions as $a) {
-                $this->beforeTriggerHooks[$t . '::' . $a][] = $callback;
-            }
-        }
-    }
-
-    public function afterTrigger(string|array $topic, string|array $action, Closure $callback): void
-    {
-        $topics  = is_array($topic) ? $topic : [$topic];
-        $actions = is_array($action) ? $action : [$action];
-
-        foreach ($topics as $t) {
-            foreach ($actions as $a) {
-                $this->afterTriggerHooks[$t . '::' . $a][] = $callback;
+                $this->beforeTriggerHooks["$t::$a"][] = $callback;
             }
         }
     }
 
     /**
-     * Register a scoped hook for when a step becomes active in a specific workflow.
-     *
-     * @param  string  $topic  The topic (e.g., Post::class) or '*'
-     * @param  string  $action  The action (e.g., 'update') or '*'
-     * @param  string|array  $stepIdentifier  Step ID, key, or '*' for all steps
-     * @param  Closure  $callback  Receives flexible parameters
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->afterTriggering()
      */
-    public function onStepActivatedFor(string $topic, string $action, string|array $stepIdentifier, Closure $callback): void
+    public function pushAfterTriggerHook(string|array $topic, string|array $action, Closure $callback): void
+    {
+        $topics  = is_array($topic) ? $topic : [$topic];
+        $actions = is_array($action) ? $action : [$action];
+
+        foreach ($topics as $t) {
+            foreach ($actions as $a) {
+                $this->afterTriggerHooks["$t::$a"][] = $callback;
+            }
+        }
+    }
+
+    /**
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->whenStepActivated(...)
+     */
+    public function pushStepActivatedHook(string $topic, string $action, string|array $stepIdentifier, Closure $callback): void
     {
         $identifiers = is_array($stepIdentifier) ? $stepIdentifier : [$stepIdentifier];
 
         foreach ($identifiers as $identifier) {
-            $key                                     = "$topic::$action::$identifier";
-            $this->stepActivatedHooks[$key][]        = $callback;
+            $this->stepActivatedHooks["$topic::$action::$identifier"][] = $callback;
         }
     }
 
     /**
-     * Register a global hook for when a step becomes active (shortcut for onStepActivatedFor('*', '*', ...)).
-     *
-     * This hook is triggered when an instance moves to a new step, including:
-     * - After workflow trigger (first step)
-     * - After step transition (next step)
-     * - After delay completes (resumed step)
-     *
-     * Use this for:
-     * - Triggering auto-execution of stateless steps
-     * - Notifying step assignees
-     * - Starting timers or SLAs
-     *
-     * @param  string|array  $stepIdentifier  Step ID, key, or '*' for all steps
-     * @param  Closure  $callback  Receives flexible parameters
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->authorizeStepUsing()
+     */
+    public function pushAuthorizationResolver(string $topic, string $action, Closure $callback): void
+    {
+        $this->authorizationResolvers["$topic::$action"] = $callback;
+    }
+
+    /**
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->resolveExceptionUsing()
+     */
+    public function pushExceptionResolver(string $topic, string $action, Closure $callback): void
+    {
+        $this->exceptionResolvers["$topic::$action"] = $callback;
+    }
+
+    /**
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->resolveAssigneesUsing()
+     */
+    public function pushAssigneeResolver(string $topic, string $action, Closure $callback): void
+    {
+        $this->assigneeResolvers["$topic::$action"] = $callback;
+    }
+
+    /**
+     * @internal Use the builder API: Dynaflow::forWorkflow(...)->resolveWorkflowUsing()
+     */
+    public function pushWorkflowResolver(string $topic, string $action, Closure $callback): void
+    {
+        $this->workflowResolvers["$topic::$action"] = $callback;
+    }
+
+    // -------------------------------------------------------------------------
+    // Deprecated public registration methods — use builder API instead
+    // -------------------------------------------------------------------------
+
+    /**
+     * @deprecated Use Dynaflow::builder()->beforeTransitionTo(...)->execute(...)
+     */
+    public function beforeTransitionTo(string|array $stepIdentifier, Closure $callback): void
+    {
+        $this->pushBeforeTransitionToHook($stepIdentifier, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::builder()->afterTransitionTo(...)->execute(...)
+     */
+    public function afterTransitionTo(string|array $stepIdentifier, Closure $callback): void
+    {
+        $this->pushAfterTransitionToHook($stepIdentifier, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::builder()->transition()->from(...)->to(...)->execute(...)
+     */
+    public function onTransition(string|array $from, string|array $to, Closure $callback): void
+    {
+        $this->pushTransitionHook($from, $to, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->whenCompleted()->execute(...)
+     */
+    public function onComplete(string|array $topic, string|array $action, Closure $callback): void
+    {
+        $this->pushCompleteHook($topic, $action, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->whenCancelled()->execute(...)
+     */
+    public function onCancel(string|array $topic, string|array $action, Closure $callback): void
+    {
+        $this->pushCancelHook($topic, $action, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->beforeTriggering()->execute(...)
+     */
+    public function beforeTrigger(string|array $topic, string|array $action, Closure $callback): void
+    {
+        $this->pushBeforeTriggerHook($topic, $action, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->afterTriggering()->execute(...)
+     */
+    public function afterTrigger(string|array $topic, string|array $action, Closure $callback): void
+    {
+        $this->pushAfterTriggerHook($topic, $action, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->whenStepActivated($stepIdentifier)->execute(...)
+     */
+    public function onStepActivatedFor(string $topic, string $action, string|array $stepIdentifier, Closure $callback): void
+    {
+        $this->pushStepActivatedHook($topic, $action, $stepIdentifier, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::builder()->whenStepActivated($stepIdentifier)->execute(...)
      */
     public function onStepActivated(string|array $stepIdentifier, Closure $callback): void
     {
-        $this->onStepActivatedFor('*', '*', $stepIdentifier, $callback);
+        $this->pushStepActivatedHook('*', '*', $stepIdentifier, $callback);
     }
 
     /**
-     * Register a scoped authorization resolver for specific workflows.
-     *
-     * @param  string  $topic  The topic (e.g., Post::class or custom string) or '*'
-     * @param  string  $action  The action (e.g., 'create', 'update') or '*'
-     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): ?bool
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->authorizeStepUsing()->execute(...)
      */
     public function authorizeStepFor(string $topic, string $action, Closure $callback): void
     {
-        $key                                   = "$topic::$action";
-        $this->authorizationResolvers[$key]    = $callback;
+        $this->pushAuthorizationResolver($topic, $action, $callback);
     }
 
     /**
-     * Register a scoped exception resolver for specific workflows.
-     *
-     * @param  string  $topic  The topic or '*'
-     * @param  string  $action  The action or '*'
-     * @param  Closure  $callback  fn(Dynaflow $workflow, $user): ?bool
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->resolveExceptionUsing()->execute(...)
      */
     public function exceptionFor(string $topic, string $action, Closure $callback): void
     {
-        $key                            = "$topic::$action";
-        $this->exceptionResolvers[$key] = $callback;
+        $this->pushExceptionResolver($topic, $action, $callback);
     }
 
     /**
-     * Register a scoped assignee resolver for specific workflows.
-     *
-     * @param  string  $topic  The topic or '*'
-     * @param  string  $action  The action or '*'
-     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): array
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->resolveAssigneesUsing()->execute(...)
      */
     public function resolveAssigneesFor(string $topic, string $action, Closure $callback): void
     {
-        $key                           = "$topic::$action";
-        $this->assigneeResolvers[$key] = $callback;
+        $this->pushAssigneeResolver($topic, $action, $callback);
     }
 
     /**
-     * Register a global authorization resolver (shortcut for authorizeStepFor('*', '*', ...)).
-     *
-     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): ?bool
+     * @deprecated Use Dynaflow::builder()->authorizeStepUsing()->execute(...)
      */
     public function authorizeStepUsing(Closure $callback): void
     {
-        $this->authorizeStepFor('*', '*', $callback);
+        $this->pushAuthorizationResolver('*', '*', $callback);
     }
 
     /**
-     * Register a global exception resolver (shortcut for exceptionFor('*', '*', ...)).
-     *
-     * @param  Closure  $callback  fn(Dynaflow $workflow, $user): ?bool
+     * @deprecated Use Dynaflow::builder()->resolveExceptionUsing()->execute(...)
      */
     public function exceptionUsing(Closure $callback): void
     {
-        $this->exceptionFor('*', '*', $callback);
+        $this->pushExceptionResolver('*', '*', $callback);
     }
 
     /**
-     * Register a global assignee resolver (shortcut for resolveAssigneesFor('*', '*', ...)).
-     *
-     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): array
+     * @deprecated Use Dynaflow::builder()->resolveAssigneesUsing()->execute(...)
      */
     public function resolveAssigneesUsing(Closure $callback): void
     {
-        $this->resolveAssigneesFor('*', '*', $callback);
+        $this->pushAssigneeResolver('*', '*', $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->resolveWorkflowUsing()->execute(...)
+     */
+    public function registerWorkflowResolver(string $topic, string $action, Closure $callback): void
+    {
+        $this->pushWorkflowResolver($topic, $action, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->resolveWorkflowUsing()->execute(...)
+     */
+    public function resolveWorkflowFor(string $topic, string $action, Closure $callback): void
+    {
+        $this->pushWorkflowResolver($topic, $action, $callback);
+    }
+
+    /**
+     * @deprecated Use Dynaflow::builder()->resolveWorkflowUsing()->execute(...)
+     */
+    public function resolveWorkflowUsing(Closure $callback): void
+    {
+        $this->pushWorkflowResolver('*', '*', $callback);
+    }
+
+    /**
+     * Attempt to resolve the Dynaflow via registered resolver callbacks.
+     * Returns null if no resolver matched or all returned null.
+     */
+    public function resolveWorkflow(string $topic, string $action, mixed $model, array $data, mixed $user): ?Dynaflow
+    {
+        $available = [
+            'topic'  => $topic,
+            'action' => $action,
+            'model'  => $model,
+            'data'   => $data,
+            'user'   => $user,
+        ];
+
+        return $this->resolveFromResolvers($this->workflowResolvers, $topic, $action, $available);
     }
 
     /**
@@ -376,9 +490,18 @@ class DynaflowHookManager
 
         $available = $this->buildContextParameters($ctx);
 
+        if (! empty($hooks)) {
+            $this->logger->debug('Hook firing: beforeTransitionTo', [
+                'step'  => $step->key,
+                'count' => count($hooks),
+            ]);
+        }
+
         foreach ($hooks as $hook) {
             $result = $this->invoker->invoke($hook, $available);
             if ($result === false) {
+                $this->logger->debug('Hook result: beforeTransitionTo — blocked', ['step' => $step->key]);
+
                 return false;
             }
         }
@@ -403,6 +526,13 @@ class DynaflowHookManager
         );
 
         $available = $this->buildContextParameters($ctx);
+
+        if (! empty($hooks)) {
+            $this->logger->debug('Hook firing: afterTransitionTo', [
+                'step'  => $step->key,
+                'count' => count($hooks),
+            ]);
+        }
 
         foreach ($hooks as $hook) {
             $this->invoker->invoke($hook, $available);
@@ -445,9 +575,20 @@ class DynaflowHookManager
                 continue;
             }
 
+            $this->logger->debug('Hook firing: onTransition', [
+                'from'  => $from->key,
+                'to'    => $to->key,
+                'count' => count($this->transitionHooks[$key]),
+            ]);
+
             foreach ($this->transitionHooks[$key] as $hook) {
                 $result = $this->invoker->invoke($hook, $available);
                 if ($result === false) {
+                    $this->logger->debug('Hook result: onTransition — blocked', [
+                        'from' => $from->key,
+                        'to'   => $to->key,
+                    ]);
+
                     return false;
                 }
             }
@@ -497,6 +638,8 @@ class DynaflowHookManager
 
     public function resolveAssignees(DynaflowStep $step, $user, ?DynaflowInstance $instance = null): array
     {
+        $step->loadMissing(['dynaflow', 'allowedTransitions']);
+
         $topic  = $step->dynaflow->topic;
         $action = $step->dynaflow->action;
 
@@ -553,6 +696,14 @@ class DynaflowHookManager
 
         $available = $this->buildContextParameters($ctx);
 
+        if (! empty($hooks)) {
+            $this->logger->debug('Hook firing: onComplete', [
+                'topic'  => $topic,
+                'action' => $action,
+                'count'  => count($hooks),
+            ]);
+        }
+
         foreach ($hooks as $hook) {
             $this->invoker->invoke($hook, $available);
         }
@@ -577,6 +728,14 @@ class DynaflowHookManager
         );
 
         $available = $this->buildContextParameters($ctx);
+
+        if (! empty($hooks)) {
+            $this->logger->debug('Hook firing: onCancel', [
+                'topic'  => $topic,
+                'action' => $action,
+                'count'  => count($hooks),
+            ]);
+        }
 
         foreach ($hooks as $hook) {
             $this->invoker->invoke($hook, $available);
@@ -644,6 +803,15 @@ class DynaflowHookManager
             'model'    => $instance->model,
         ];
 
+        if (! empty($hooks)) {
+            $this->logger->debug('Hook firing: onStepActivated', [
+                'step'   => $step->key,
+                'topic'  => $topic,
+                'action' => $action,
+                'count'  => count($hooks),
+            ]);
+        }
+
         foreach ($hooks as $hook) {
             $this->invoker->invoke($hook, $available);
         }
@@ -674,9 +842,22 @@ class DynaflowHookManager
             'user'     => $user,
         ];
 
+        if (! empty($hooks)) {
+            $this->logger->debug('Hook firing: beforeTrigger', [
+                'topic'  => $topic,
+                'action' => $action,
+                'count'  => count($hooks),
+            ]);
+        }
+
         foreach ($hooks as $hook) {
             $result = $this->invoker->invoke($hook, $available);
             if ($result === false) {
+                $this->logger->debug('Hook result: beforeTrigger — skipped', [
+                    'topic'  => $topic,
+                    'action' => $action,
+                ]);
+
                 return false; // Skip workflow
             }
         }
@@ -707,21 +888,26 @@ class DynaflowHookManager
             'user'     => $user,
         ];
 
+        if (! empty($hooks)) {
+            $this->logger->debug('Hook firing: afterTrigger', [
+                'topic'      => $topic,
+                'action'     => $action,
+                'instance'   => $instance->id,
+                'count'      => count($hooks),
+            ]);
+        }
+
         foreach ($hooks as $hook) {
             $this->invoker->invoke($hook, $available);
         }
     }
 
     /**
-     * Alias for authorizeStepFor() - register per-workflow authorization resolver.
-     *
-     * @param  string  $topic  The topic or '*'
-     * @param  string  $action  The action or '*'
-     * @param  Closure  $callback  fn(DynaflowStep $step, $user, ?DynaflowInstance $instance): ?bool
+     * @deprecated Use Dynaflow::forWorkflow($topic, $action)->authorizeStepUsing()->execute(...)
      */
     public function authorizeWorkflowStepUsing(string $topic, string $action, Closure $callback): void
     {
-        $this->authorizeStepFor($topic, $action, $callback);
+        $this->pushAuthorizationResolver($topic, $action, $callback);
     }
 
     /**

@@ -65,10 +65,10 @@ Dynaflow::builder()
 
 | Hook Type | Available Parameters |
 |-----------|---------------------|
-| onComplete, onCancel, beforeTransitionTo, afterTransitionTo, onTransition | `ctx`, `context`, `instance`, `sourceStep`, `targetStep`, `step`, `decision`, `user`, `execution`, `notes`, `model`, `data`, `workflow` |
-| beforeTrigger | `workflow`, `model`, `data`, `user` |
-| afterTrigger | `workflow`, `instance`, `model`, `user` |
-| onStepActivated | `instance`, `step`, `workflow`, `user`, `model` |
+| whenCompleted, whenCancelled, beforeTransitionTo, afterTransitionTo, transition | `ctx`, `context`, `instance`, `sourceStep`, `targetStep`, `step`, `decision`, `user`, `execution`, `notes`, `model`, `data`, `workflow` |
+| beforeTriggering / beforeStarting | `workflow`, `model`, `data`, `user` |
+| afterTriggering / whenStarted | `workflow`, `instance`, `model`, `user` |
+| whenStepActivated | `instance`, `step`, `workflow`, `user`, `model` |
 
 **Type hints always match first:**
 ```php
@@ -111,7 +111,7 @@ Dynaflow::builder()
         $ctx->duration();        // Get execution duration (seconds)
 
         // Apply changes based on final step or decision
-        if ($ctx->decision === 'approved') {
+        if ($ctx->instance->isApproved()) {
             $ctx->model()->update($ctx->pendingData());
         }
     });
@@ -146,7 +146,7 @@ Dynaflow::builder()
     });
 ```
 
-**Note:** `onReject()` has been removed. Use `onCancel()` for all cancellation scenarios. Check `$ctx->decision` to determine the specific reason.
+**Note:** `onReject()` has been removed. Use `->whenCancelled()` for all cancellation scenarios. Check `$ctx->decision` to determine the specific reason.
 
 ### Before Trigger Hooks
 
@@ -427,7 +427,7 @@ Dynaflow::builder()
         if ($ctx->targetStep->key === 'approved') {
             $ctx->model()->update($ctx->pendingData());
         }
-        // Rejected step also triggers onComplete, but you can check targetStep
+        // whenCompleted hook also runs for rejected steps — check targetStep to differentiate
     });
 
 // Or use afterTransitionTo hooks for specific steps

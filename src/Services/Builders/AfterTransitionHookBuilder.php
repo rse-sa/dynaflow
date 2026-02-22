@@ -55,6 +55,6 @@ class AfterTransitionHookBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->afterTransitionTo($this->stepIdentifier, $callback);
+        $this->manager->pushAfterTransitionToHook($this->stepIdentifier, $callback);
     }
 }

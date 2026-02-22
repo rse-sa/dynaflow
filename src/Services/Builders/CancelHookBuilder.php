@@ -57,6 +57,6 @@ class CancelHookBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->onCancel($this->topic, $this->action, $callback);
+        $this->manager->pushCancelHook($this->topic, $this->action, $callback);
     }
 }

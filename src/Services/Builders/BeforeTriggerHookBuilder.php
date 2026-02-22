@@ -57,6 +57,6 @@ class BeforeTriggerHookBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->beforeTrigger($this->topic, $this->action, $callback);
+        $this->manager->pushBeforeTriggerHook($this->topic, $this->action, $callback);
     }
 }

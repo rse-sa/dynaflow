@@ -33,6 +33,6 @@ class ExceptionResolverBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->exceptionFor($this->topic, $this->action, $callback);
+        $this->manager->pushExceptionResolver($this->topic, $this->action, $callback);
     }
 }

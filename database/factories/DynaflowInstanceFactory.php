@@ -4,13 +4,18 @@ namespace RSE\DynaFlow\Database\Factories;
 
 use Illuminate\Database\Eloquent\Factories\Factory;
 use RSE\DynaFlow\Models\Dynaflow;
-use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Tests\Models\TestModel;
 use RSE\DynaFlow\Tests\Models\User;
 
 class DynaflowInstanceFactory extends Factory
 {
-    protected $model = DynaflowInstance::class;
+    protected $model;
+
+    public function __construct(...$arguments)
+    {
+        $this->model = dynaflowInstanceModel();
+        parent::__construct(...$arguments);
+    }
 
     public function definition(): array
     {

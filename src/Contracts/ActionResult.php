@@ -28,7 +28,7 @@ class ActionResult
     public const STATUS_ROUTE_TO = 'route_to';
 
     protected function __construct(
-        protected string $status,
+        public string $status,
         protected array $data = [],
         protected ?string $route = null,
         protected ?string $error = null

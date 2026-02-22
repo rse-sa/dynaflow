@@ -33,6 +33,6 @@ class AssigneeResolverBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->resolveAssigneesFor($this->topic, $this->action, $callback);
+        $this->manager->pushAssigneeResolver($this->topic, $this->action, $callback);
     }
 }

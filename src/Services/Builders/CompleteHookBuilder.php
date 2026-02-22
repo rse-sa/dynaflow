@@ -57,6 +57,6 @@ class CompleteHookBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->onComplete($this->topic, $this->action, $callback);
+        $this->manager->pushCompleteHook($this->topic, $this->action, $callback);
     }
 }

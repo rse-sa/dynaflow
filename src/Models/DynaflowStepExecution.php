@@ -35,7 +35,7 @@ class DynaflowStepExecution extends Model
 
     public function instance(): BelongsTo
     {
-        return $this->belongsTo(DynaflowInstance::class, 'dynaflow_instance_id');
+        return $this->belongsTo(dynaflowInstanceModel(), 'dynaflow_instance_id');
     }
 
     public function step(): BelongsTo

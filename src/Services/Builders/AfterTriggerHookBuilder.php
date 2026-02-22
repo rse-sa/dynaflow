@@ -57,6 +57,6 @@ class AfterTriggerHookBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->afterTrigger($this->topic, $this->action, $callback);
+        $this->manager->pushAfterTriggerHook($this->topic, $this->action, $callback);
     }
 }

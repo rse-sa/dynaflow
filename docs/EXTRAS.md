@@ -34,7 +34,7 @@ $workflow = Dynaflow::create([
 
 Updates to only `view_count` will skip the workflow. Updates to `title` will trigger it.
 
-### Using beforeTrigger Hooks
+### Using Before Trigger Hooks
 
 For complex conditional logic:
 
@@ -63,6 +63,201 @@ Dynaflow::builder()
         return true;  // Trigger workflow
     });
 ```
+
+## Workflow Status Management
+
+While Dynaflow allows any string value for workflow status, using the recommended enum cases provides type safety and better IDE autocomplete.
+
+### Recommended Status Cases
+
+```php
+use RSE\DynaFlow\Enums\DynaflowStatus;
+
+// Available status cases
+DynaflowStatus::PENDING       // 'pending'       - Active workflow awaiting action
+DynaflowStatus::COMPLETED     // 'completed'     - Generic completion (legacy)
+DynaflowStatus::APPROVED      // 'approved'      - Explicitly approved
+DynaflowStatus::REJECTED      // 'rejected'      - Explicitly rejected
+DynaflowStatus::AUTO_APPROVED // 'auto_approved' - Auto-approved (bypass mode)
+DynaflowStatus::AUTO_REJECTED // 'auto_rejected' - Auto-rejected (timeout)
+DynaflowStatus::CANCELLED     // 'cancelled'     - Cancelled by user
+```
+
+### When to Use Each Status
+
+| Status | When to Use |
+|--------|-------------|
+| `pending` | Default status when workflow starts |
+| `completed` | Generic success (legacy, prefer `approved` for clarity) |
+| `approved` | Final step approved with positive outcome |
+| `rejected` | Final step rejected or workflow terminated negatively |
+| `auto_approved` | Workflow bypassed for exception user (direct_complete/auto_follow) |
+| `auto_rejected` | Step timeout auto-rejection |
+| `cancelled` | User cancelled workflow mid-process |
+
+### Using Enum Cases in Code
+
+Instead of hardcoded strings:
+
+```php
+// Before (not recommended)
+$instance->update(['status' => 'approved']);
+if ($instance->status === 'rejected') { ... }
+
+// After (recommended) - use enum for setting, helper for checking
+use RSE\DynaFlow\Enums\DynaflowStatus;
+
+$instance->update(['status' => DynaflowStatus::APPROVED->value]);
+if ($instance->isRejected()) { ... }  // Use helper method
+```
+
+### Helper Methods on DynaflowInstance
+
+The model provides semantic helper methods:
+
+```php
+// Individual checks
+$instance->isPending();        // pending
+$instance->isApproved();       // completed OR approved OR auto_approved
+$instance->isCompleted();      // same as isApproved()
+$instance->isRejected();       // rejected OR auto_rejected
+$instance->isAutoRejected();   // auto_rejected specifically
+$instance->isCancelled();      // cancelled
+$instance->isAutoApproved();   // auto_approved
+$instance->isTerminated();     // cancelled OR rejected OR auto_rejected
+```
+
+### Query Scopes
+
+```php
+// Query by status group
+DynaflowInstance::pending()->get();
+DynaflowInstance::approved()->get();       // completed, approved, auto_approved
+DynaflowInstance::rejected()->get();       // rejected, auto_rejected
+DynaflowInstance::terminated()->get();     // cancelled, rejected, auto_rejected
+DynaflowInstance::cancelled()->get();
+DynaflowInstance::autoApproved()->get();
+```
+
+### Static Enum Helper Methods
+
+```php
+use RSE\DynaFlow\Enums\DynaflowStatus;
+
+// Get all success/failure statuses
+$successStatuses = DynaflowStatus::getSuccessStatuses(); // ['completed', 'approved', 'auto_approved']
+$failureStatuses = DynaflowStatus::getFailureStatuses(); // ['rejected', 'auto_rejected', 'cancelled']
+
+// Check any status string
+if (DynaflowStatus::isSuccessful($someStatus)) { ... }
+if (DynaflowStatus::isFailure($someStatus)) { ... }
+```
+
+### Setting Final Step Status
+
+Use the `workflow_status` field on final steps:
+
+```php
+use RSE\DynaFlow\Enums\DynaflowStatus;
+
+$finalStep = DynaflowStep::create([
+    'dynaflow_id' => $workflow->id,
+    'key' => 'approved',
+    'name' => ['en' => 'Approved'],
+    'is_final' => true,
+    'workflow_status' => DynaflowStatus::APPROVED->value,
+]);
+```
+
+If `workflow_status` is not set, the decision value becomes the instance status.
+
+### Checking Status in Hooks
+
+```php
+use RSE\DynaFlow\Enums\DynaflowStatus;
+use RSE\DynaFlow\Support\DynaflowContext;
+
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Use helper methods instead of raw status checks
+        if ($ctx->instance->isApproved()) {
+            // Workflow completed successfully
+            $ctx->model()->update($ctx->pendingData());
+        }
+
+        if ($ctx->instance->isRejected()) {
+            // Workflow was rejected at final step
+            // Maybe notify or log
+        }
+    });
+```
+
+### Important: whenCompleted vs whenCancelled
+
+Understanding when each hook executes is critical:
+
+| Hook | Executes When |
+|------|---------------|
+| `whenCompleted` | When workflow reaches a **final step** (`is_final=true`) — **regardless of decision** |
+| `whenCancelled` | Only when `cancelWorkflow()` is **explicitly called** |
+
+**Key behaviors:**
+
+1. **Final step with decision="rejected"** → `whenCompleted` runs (NOT `whenCancelled`)
+   ```php
+   // This triggers whenCompleted hook
+   $engine->transitionTo($instance, $finalStep, $user, 'rejected');
+   // The final step has is_final=true, so workflow "completes" with rejected status
+   ```
+
+2. **Explicit cancellation mid-workflow** → `whenCancelled` runs
+   ```php
+   // This triggers whenCancelled hook
+   $engine->cancelWorkflow($instance, $user, 'rejected', 'User withdrew request');
+   ```
+
+**Recommended pattern for multi-outcome workflows:**
+
+```php
+use RSE\DynaFlow\Enums\DynaflowStatus;
+use RSE\DynaFlow\Support\DynaflowContext;
+
+// Handle ALL final outcomes (approved, rejected, etc.)
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Use helper methods to check status
+        if ($ctx->instance->isApproved()) {
+            $ctx->model()->update($ctx->pendingData());
+        }
+        elseif ($ctx->instance->isRejected()) {
+            // Notify user of rejection
+            $ctx->model->notify(new RejectionNotification($ctx->decision));
+        }
+        elseif ($ctx->instance->isCancelled()) {
+            // Handle cancellation (rare in whenCompleted, but possible)
+        }
+    });
+
+// Handle explicit cancellations (user withdrawal, etc.)
+Dynaflow::builder()
+    ->forWorkflow(Post::class, 'update')
+    ->whenCancelled()
+    ->execute(function (DynaflowContext $ctx) {
+        // Clean up resources
+        // Notification::send($ctx->user, new WithdrawnNotification());
+    });
+```
+
+**Why this distinction matters:**
+
+- `whenCompleted` marks data as applied (`applied = true`)
+- `whenCancelled` does NOT mark data as applied
+- Final steps always use `whenCompleted` even when rejected
+- Use `cancelWorkflow()` to truly abort and trigger `whenCancelled`
 
 ## Draft Support
 
@@ -275,8 +470,10 @@ php artisan dynaflow:process-expired-steps
 You can also implement your own logic for duration limits:
 
 ```php
+use RSE\DynaFlow\Enums\DynaflowStatus;
+
 // Custom command or job
-$pendingInstances = DynaflowInstance::where('status', 'pending')->get();
+$pendingInstances = DynaflowInstance::pending()->get();
 
 foreach ($pendingInstances as $instance) {
     $currentStep = $instance->currentStep;
@@ -286,7 +483,7 @@ foreach ($pendingInstances as $instance) {
         app(DynaflowEngine::class)->cancelWorkflow(
             instance: $instance,
             user: null, // System action
-            decision: 'auto_rejected',
+            decision: DynaflowStatus::AUTO_REJECTED->value,
             notes: 'Automatically rejected due to timeout'
         );
     }
@@ -709,6 +906,94 @@ Dynaflow::builder()
     });
 ```
 
+## Debug Logging
+
+Dynaflow can write detailed debug entries for every workflow action to help trace unexpected behavior in development or staging.
+
+### Enabling
+
+Set in your `.env`:
+
+```env
+DYNAFLOW_DEBUG=true
+```
+
+Or publish and edit `config/dynaflow.php`:
+
+```php
+'debug' => env('DYNAFLOW_DEBUG', false),
+```
+
+### Log Channel
+
+By default logs go to the application's default channel. Point them elsewhere:
+
+```env
+DYNAFLOW_LOG_CHANNEL=daily
+```
+
+Any channel defined in `config/logging.php` is accepted (`stack`, `stderr`, `slack`, etc.).
+
+### What Gets Logged
+
+All entries are prefixed with `[Dynaflow]` at the `debug` level.
+
+| Event | Message |
+|---|---|
+| `trigger()` called | `Trigger requested` |
+| No workflow found | `No workflow — applying directly` |
+| Workflow resolved | `Workflow resolved` |
+| Bypass detected | `Bypass detected` |
+| Field filter skips trigger | `Trigger skipped: field filter` |
+| `beforeTrigger` hook returns false | `Trigger skipped: beforeTrigger returned false` |
+| Instance created | `Instance created` |
+| Step becomes active | `Step activated` |
+| Hook advanced instance (skips engine continuation) | `Step activation hook advanced instance — skipping engine continuation` |
+| Inactive step skipped | `Skipping inactive step` |
+| `transitionTo()` called | `Transition requested` |
+| Authorization fails | `Authorization failed` |
+| Invalid transition | `Invalid transition` |
+| Execution record created | `Execution recorded` |
+| `beforeTransitionTo` hook blocks | `Transition blocked by beforeTransitionTo hook` |
+| `onTransition` hook blocks | `Transition blocked by onTransition hook` |
+| Workflow completed | `Workflow completed` |
+| Workflow cancelled | `Workflow cancelled` |
+| Any hook fires | `Hook firing: <type>` |
+
+### Sample Output
+
+```
+[2025-10-31 10:00:00] local.DEBUG: [Dynaflow] Trigger requested {"topic":"App\\Models\\Post","action":"update","model_id":42,"user_id":1}
+[2025-10-31 10:00:00] local.DEBUG: [Dynaflow] Workflow resolved {"workflow_id":3,"workflow":"Post Update Approval"}
+[2025-10-31 10:00:00] local.DEBUG: [Dynaflow] Instance created {"instance_id":17,"first_step_key":"manager_review"}
+[2025-10-31 10:00:00] local.DEBUG: [Dynaflow] Step activated {"instance_id":17,"step_key":"manager_review"}
+[2025-10-31 10:00:01] local.DEBUG: [Dynaflow] Transition requested {"instance_id":17,"from":"manager_review","to":"approved","decision":"approved","user_id":2}
+[2025-10-31 10:00:01] local.DEBUG: [Dynaflow] Execution recorded {"execution_id":28,"instance_id":17,"step_key":"manager_review","decision":"approved"}
+[2025-10-31 10:00:01] local.DEBUG: [Dynaflow] Workflow completed {"instance_id":17,"status":"approved"}
+```
+
+### Calling `transitionTo()` from a Hook
+
+A common pattern is auto-advancing steps from inside `whenStepActivated` when no assignees are available. The engine explicitly supports this — after hook execution it reloads the instance and skips its own continuation if the hook already advanced it. The debug log will show:
+
+```
+[Dynaflow] Step activation hook advanced instance — skipping engine continuation
+```
+
+This means everything is working correctly; it is not an error.
+
+### Test Isolation
+
+`DynaflowHookManager` is a singleton. When writing tests, call `reset()` before each test to clear accumulated hooks:
+
+```php
+protected function setUp(): void
+{
+    parent::setUp();
+    app(DynaflowHookManager::class)->reset();
+}
+```
+
 ## Configuration
 
 Publish config:
@@ -721,10 +1006,43 @@ Available options:
 
 ```php
 return [
-    'route_prefix' => env('WORKFLOW_ROUTE_PREFIX', 'workflows'),
-    'middleware' => ['web', 'auth'],
+    // Custom model classes (must extend base models)
+    'models' => [
+        'instance' => \RSE\DynaFlow\Models\DynaflowInstance::class,
+        'data' => \RSE\DynaFlow\Models\DynaflowData::class,
+    ],
+
+    'route_prefix'  => env('WORKFLOW_ROUTE_PREFIX', 'workflows'),
+    'middleware'     => ['web', 'auth'],
+
+    // Debug logging
+    'debug'          => env('DYNAFLOW_DEBUG', false),
+    'log_channel'    => env('DYNAFLOW_LOG_CHANNEL', null),
 ];
 ```
+
+### Custom Models
+
+Extend `DynaflowInstance` or `DynaflowData` to add custom relationships:
+
+```php
+// config/dynaflow.php
+'models' => [
+    'instance' => \App\Models\CustomDynaflowInstance::class,
+    'data' => \App\Models\CustomDynaflowData::class,
+],
+
+// App\Models\CustomDynaflowInstance.php
+class CustomDynaflowInstance extends \RSE\DynaFlow\Models\DynaflowInstance
+{
+    public function comments(): HasMany
+    {
+        return $this->hasMany(WorkflowComment::class, 'dynaflow_instance_id');
+    }
+}
+```
+
+Custom models must extend their base counterparts.
 
 ## Next Steps
 

@@ -105,6 +105,6 @@ class TransitionHookBuilder
             );
         }
 
-        $this->manager->onTransition($this->from, $this->to, $callback);
+        $this->manager->pushTransitionHook($this->from, $this->to, $callback);
     }
 }

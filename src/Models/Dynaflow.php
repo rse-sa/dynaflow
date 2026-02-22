@@ -46,7 +46,7 @@ class Dynaflow extends Model
 
     public function instances(): HasMany
     {
-        return $this->hasMany(DynaflowInstance::class);
+        return $this->hasMany(dynaflowInstanceModel());
     }
 
     public function exceptions(): HasMany

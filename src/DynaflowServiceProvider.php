@@ -30,6 +30,7 @@ class DynaflowServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__ . '/../config/dynaflow.php', 'dynaflow');
 
         $this->app->singleton(CallbackInvoker::class);
+        $this->app->singleton(DynaflowLogger::class);
         $this->app->singleton(DynaflowHookManager::class);
         $this->app->singleton(DynaflowValidator::class);
         $this->app->singleton(DynaflowEngine::class);

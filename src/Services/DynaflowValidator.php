@@ -4,6 +4,7 @@ namespace RSE\DynaFlow\Services;
 
 use Illuminate\Database\Eloquent\Model;
 use RSE\DynaFlow\DynaflowHookManager;
+use RSE\DynaFlow\Enums\DynaflowStatus;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
@@ -40,10 +41,12 @@ class DynaflowValidator
 
     public function getActiveDuplicateInstance(Dynaflow $workflow, Model $model): ?DynaflowInstance
     {
-        return DynaflowInstance::where('dynaflow_id', $workflow->id)
+        $instanceModel = dynaflowInstanceModel();
+
+        return $instanceModel::where('dynaflow_id', $workflow->id)
             ->where('model_type', $model->getMorphClass())
             ->where('model_id', $model->getKey())
-            ->where('status', 'pending')
+            ->where('status', DynaflowStatus::PENDING->value)
             ->first();
     }
 

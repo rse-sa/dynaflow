@@ -67,7 +67,7 @@ $notifyStep = DynaflowStep::create([
 
 When a stateless step becomes active:
 
-1. `onStepActivated` hooks run
+1. `whenStepActivated` hooks run
 2. `AutoStepExecutor` resolves the action handler
 3. Handler executes and returns `ActionResult`
 4. Based on result:

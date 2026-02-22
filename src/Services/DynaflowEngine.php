@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use RSE\DynaFlow\DynaflowHookManager;
+use RSE\DynaFlow\DynaflowLogger;
 use RSE\DynaFlow\Enums\BypassMode;
 use RSE\DynaFlow\Enums\DynaflowStatus;
 use RSE\DynaFlow\Events\DynaflowCancelled;
@@ -14,7 +15,6 @@ use RSE\DynaFlow\Events\DynaflowCompleted;
 use RSE\DynaFlow\Events\DynaflowStarted;
 use RSE\DynaFlow\Events\StepTransitioned;
 use RSE\DynaFlow\Models\Dynaflow;
-use RSE\DynaFlow\Models\DynaflowData;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
 use RSE\DynaFlow\Models\DynaflowStepExecution;
@@ -26,10 +26,12 @@ class DynaflowEngine
     public function __construct(
         protected DynaflowValidator $validator,
         protected DynaflowHookManager $hookManager,
-        protected ?AutoStepExecutor $autoStepExecutor = null
+        protected ?AutoStepExecutor $autoStepExecutor = null,
+        protected ?DynaflowLogger $logger = null
     ) {
         // Auto-resolve if not injected (for backward compatibility)
         $this->autoStepExecutor ??= app(AutoStepExecutor::class);
+        $this->logger            ??= app(DynaflowLogger::class);
     }
 
     /**
@@ -37,17 +39,26 @@ class DynaflowEngine
      */
     public function trigger(string $topic, string $action, ?Model $model, array $data, $user): mixed
     {
-        $workflow = Dynaflow::where('topic', $topic)
-            ->where('action', $action)
-            ->where('active', true)
-            ->first();
+        $this->logger->debug('Trigger requested', [
+            'topic'    => $topic,
+            'action'   => $action,
+            'model_id' => $model?->getKey(),
+            'user_id'  => $user->getKey(),
+        ]);
+
+        $workflow = $this->resolveWorkflow($topic, $action, $model, $data, $user);
 
         if (! $workflow) {
+            $this->logger->debug('No workflow — applying directly', ['topic' => $topic, 'action' => $action]);
+
             return $this->applyDirectly($topic, $action, $model, $data, $user);
         }
 
+        $this->logger->debug('Workflow resolved', ['workflow_id' => $workflow->id, 'workflow' => $workflow->name]);
+
         if ($this->validator->shouldBypassDynaflow($workflow, $user)) {
             $bypassMode = $workflow->getBypassMode();
+            $this->logger->debug('Bypass detected', ['mode' => $bypassMode, 'user_id' => $user->getKey()]);
 
             return match ($bypassMode) {
                 BypassMode::DIRECT_COMPLETE->value => $this->triggerWithDirectComplete($workflow, $model, $data, $user),
@@ -60,12 +71,16 @@ class DynaflowEngine
         // Check field-based filtering (monitored_fields / ignored_fields)
         if ($model && $model->exists && $action === 'update') {
             if (! $this->shouldTriggerBasedOnFields($workflow, $model, $data)) {
+                $this->logger->debug('Trigger skipped: field filter', ['topic' => $topic, 'action' => $action]);
+
                 return $this->applyDirectly($topic, $action, $model, $data, $user);
             }
         }
 
         // Run beforeTrigger hooks - can skip workflow by returning false
         if (! $this->hookManager->runBeforeTriggerHooks($workflow, $model, $data, $user)) {
+            $this->logger->debug('Trigger skipped: beforeTrigger returned false', ['topic' => $topic, 'action' => $action]);
+
             return $this->applyDirectly($topic, $action, $model, $data, $user);
         }
 
@@ -77,7 +92,8 @@ class DynaflowEngine
                 $duplicateInstance?->update(['status' => DynaflowStatus::CANCELLED->value]);
             }
 
-            $instance = DynaflowInstance::create([
+            $instanceModel = dynaflowInstanceModel();
+            $instance      = $instanceModel::create([
                 'dynaflow_id'       => $workflow->id,
                 'model_type'        => $model?->getMorphClass(),
                 'model_id'          => $model?->getKey(),
@@ -88,7 +104,13 @@ class DynaflowEngine
                 'step_started_at'   => now(),
             ]);
 
-            DynaflowData::create([
+            $this->logger->debug('Instance created', [
+                'instance_id'     => $instance->id,
+                'first_step_key'  => $workflow->steps->first()?->key,
+            ]);
+
+            $dataModel = dynaflowDataModel();
+            $dataModel::create([
                 'dynaflow_instance_id' => $instance->id,
                 'data'                 => $data,
                 'applied'              => false,
@@ -102,16 +124,31 @@ class DynaflowEngine
             $firstStep = $workflow->steps->first();
 
             if ($firstStep) {
+                $this->logger->debug('Step activated', ['instance_id' => $instance->id, 'step_key' => $firstStep->key]);
+
                 // Run step activated hooks
                 $this->hookManager->runStepActivatedHooks($instance, $firstStep, $user);
 
-                // Trigger auto-execution if first step is auto-executable
-                if ($firstStep->isAutoExecutable()) {
-                    $this->autoStepExecutor->execute($instance, $firstStep, $user);
+                // Reload after hooks — a hook may have called transitionTo() and advanced
+                // the instance, which would leave $instance with a stale currentStep cache.
+                $instance = $instance->fresh();
+
+                // Only proceed if the hook didn't already advance past this step
+                if ($instance->current_step_id === $firstStep->id) {
+                    if ($firstStep->isSkippable()) {
+                        $this->skipInactiveStep($instance, $firstStep, $user);
+                    } elseif ($firstStep->isAutoExecutable()) {
+                        $this->autoStepExecutor->execute($instance, $firstStep, $user);
+                    }
+                } else {
+                    $this->logger->debug('Step activation hook advanced instance — skipping engine continuation', [
+                        'instance_id' => $instance->id,
+                        'step_key'    => $firstStep->key,
+                    ]);
                 }
             }
 
-            return $instance;
+            return $instance->fresh();
         });
     }
 
@@ -141,7 +178,8 @@ class DynaflowEngine
             }
 
             // Create instance
-            $instance = DynaflowInstance::create([
+            $instanceModel = dynaflowInstanceModel();
+            $instance      = $instanceModel::create([
                 'dynaflow_id'       => $workflow->id,
                 'model_type'        => $model?->getMorphClass(),
                 'model_id'          => $model?->getKey(),
@@ -152,7 +190,8 @@ class DynaflowEngine
                 'step_started_at'   => now(),
             ]);
 
-            DynaflowData::create([
+            $dataModel = dynaflowDataModel();
+            $dataModel::create([
                 'dynaflow_instance_id' => $instance->id,
                 'data'                 => $data,
                 'applied'              => false,
@@ -164,7 +203,7 @@ class DynaflowEngine
             $ctx = new DynaflowContext(
                 instance: $instance,
                 targetStep: $finalStep,
-                decision: 'auto_approved',
+                decision: DynaflowStatus::AUTO_APPROVED->value,
                 user: $user,
                 sourceStep: null,
                 execution: null,
@@ -184,7 +223,7 @@ class DynaflowEngine
                 'dynaflow_step_id'     => $finalStep->id,
                 'executed_by_type'     => $user->getMorphClass(),
                 'executed_by_id'       => $user->getKey(),
-                'decision'             => 'auto_approved',
+                'decision'             => DynaflowStatus::AUTO_APPROVED->value,
                 'note'                 => 'Auto-approved via bypass (direct_complete)',
                 'bypassed'             => true,
                 'duration'             => 0,
@@ -240,7 +279,8 @@ class DynaflowEngine
             }
 
             // Create instance
-            $instance = DynaflowInstance::create([
+            $instanceModel = dynaflowInstanceModel();
+            $instance      = $instanceModel::create([
                 'dynaflow_id'       => $workflow->id,
                 'model_type'        => $model?->getMorphClass(),
                 'model_id'          => $model?->getKey(),
@@ -251,7 +291,8 @@ class DynaflowEngine
                 'step_started_at'   => now(),
             ]);
 
-            DynaflowData::create([
+            $dataModel = dynaflowDataModel();
+            $dataModel::create([
                 'dynaflow_instance_id' => $instance->id,
                 'data'                 => $data,
                 'applied'              => false,
@@ -268,7 +309,7 @@ class DynaflowEngine
                 $ctx = new DynaflowContext(
                     instance: $instance,
                     targetStep: $step,
-                    decision: 'auto_approved',
+                    decision: DynaflowStatus::AUTO_APPROVED->value,
                     user: $user,
                     sourceStep: $previousStep,
                     execution: null,
@@ -295,7 +336,7 @@ class DynaflowEngine
                     'dynaflow_step_id'     => $step->id,
                     'executed_by_type'     => $user->getMorphClass(),
                     'executed_by_id'       => $user->getKey(),
-                    'decision'             => 'auto_approved',
+                    'decision'             => DynaflowStatus::AUTO_APPROVED->value,
                     'note'                 => 'Auto-approved via bypass (auto_follow)',
                     'bypassed'             => true,
                     'duration'             => 0,
@@ -317,7 +358,7 @@ class DynaflowEngine
             $ctx       = new DynaflowContext(
                 instance: $instance,
                 targetStep: $finalStep,
-                decision: 'auto_approved',
+                decision: DynaflowStatus::AUTO_APPROVED->value,
                 user: $user,
                 sourceStep: null,
                 execution: $lastExecution,
@@ -379,7 +420,8 @@ class DynaflowEngine
             }
 
             // Create instance
-            $instance = DynaflowInstance::create([
+            $instanceModel = dynaflowInstanceModel();
+            $instance      = $instanceModel::create([
                 'dynaflow_id'       => $workflow->id,
                 'model_type'        => $model?->getMorphClass(),
                 'model_id'          => $model?->getKey(),
@@ -390,7 +432,8 @@ class DynaflowEngine
                 'step_started_at'   => now(),
             ]);
 
-            DynaflowData::create([
+            $dataModel = dynaflowDataModel();
+            $dataModel::create([
                 'dynaflow_instance_id' => $instance->id,
                 'data'                 => $data,
                 'applied'              => false,
@@ -407,7 +450,7 @@ class DynaflowEngine
                 $ctx = new DynaflowContext(
                     instance: $instance,
                     targetStep: $step,
-                    decision: 'auto_approved',
+                    decision: DynaflowStatus::AUTO_APPROVED->value,
                     user: $user,
                     sourceStep: $previousStep,
                     execution: null,
@@ -434,7 +477,7 @@ class DynaflowEngine
                     'dynaflow_step_id'     => $step->id,
                     'executed_by_type'     => $user->getMorphClass(),
                     'executed_by_id'       => $user->getKey(),
-                    'decision'             => 'auto_approved',
+                    'decision'             => DynaflowStatus::AUTO_APPROVED->value,
                     'note'                 => 'Auto-approved via bypass (custom_steps)',
                     'bypassed'             => true,
                     'duration'             => 0,
@@ -456,7 +499,7 @@ class DynaflowEngine
             $ctx       = new DynaflowContext(
                 instance: $instance,
                 targetStep: $finalStep,
-                decision: 'auto_approved',
+                decision: DynaflowStatus::AUTO_APPROVED->value,
                 user: $user,
                 sourceStep: null,
                 execution: $lastExecution,
@@ -516,12 +559,22 @@ class DynaflowEngine
 
         $sourceStep = $instance->currentStep;
 
+        $this->logger->debug('Transition requested', [
+            'instance_id' => $instance->id,
+            'from'        => $sourceStep?->key,
+            'to'          => $targetStep->key,
+            'decision'    => $decision,
+            'user_id'     => $user->getKey(),
+        ]);
+
         if (! $this->validator->canUserExecuteStep($sourceStep, $user)) {
+            $this->logger->debug('Authorization failed', ['step_key' => $sourceStep?->key, 'user_id' => $user->getKey()]);
             throw new Exception('User not authorized to execute this step');
         }
 
         if (! $sourceStep->canTransitionTo($targetStep)) {
-            throw new Exception('Invalid step transition');
+            $this->logger->debug('Invalid transition', ['from' => $sourceStep->key, 'to' => $targetStep->key]);
+            throw new Exception('Invalid step transition ('. $sourceStep->key .' -> '. $targetStep->key .')');
         }
 
         // Create context object
@@ -538,11 +591,13 @@ class DynaflowEngine
 
         // Run beforeTransitionTo hooks (can block)
         if (! $this->hookManager->runBeforeTransitionToHooks($ctx)) {
+            $this->logger->debug('Transition blocked by beforeTransitionTo hook', ['step_key' => $targetStep->key]);
             throw new Exception('Step execution blocked by hook');
         }
 
         // Run transition hooks (can block)
         if (! $this->hookManager->runTransitionHooks($ctx)) {
+            $this->logger->debug('Transition blocked by onTransition hook', ['from' => $sourceStep->key, 'to' => $targetStep->key]);
             throw new Exception('Transition blocked by hook');
         }
 
@@ -566,6 +621,13 @@ class DynaflowEngine
             // Update context with execution
             $ctx->execution = $execution;
 
+            $this->logger->debug('Execution recorded', [
+                'execution_id' => $execution->id,
+                'instance_id'  => $instance->id,
+                'step_key'     => $ctx->sourceStep->key,
+                'decision'     => $ctx->decision,
+            ]);
+
             // Send notifications if enabled
             $this->sendStepNotifications($ctx);
 
@@ -582,15 +644,30 @@ class DynaflowEngine
                 // Fire afterTransitionTo hook
                 $this->hookManager->runAfterTransitionToHooks($ctx);
 
-                // Reload instance to get fresh state
+                // Reload instance before activating next step
                 $instance = $instance->fresh();
+
+                $this->logger->debug('Step activated', ['instance_id' => $instance->id, 'step_key' => $targetStep->key]);
 
                 // Run step activated hooks for the new step
                 $this->hookManager->runStepActivatedHooks($instance, $targetStep, $ctx->user);
 
-                // Trigger auto-execution if next step is auto-executable
-                if ($targetStep->isAutoExecutable()) {
-                    $this->autoStepExecutor->execute($instance, $targetStep, $ctx->user);
+                // Reload after hooks — a hook may have called transitionTo() and advanced
+                // the instance, leaving stale currentStep cache on the object we hold.
+                $instance = $instance->fresh();
+
+                // Only proceed if the hook didn't already advance past this step
+                if ($instance->current_step_id === $targetStep->id) {
+                    if ($targetStep->isSkippable()) {
+                        $this->skipInactiveStep($instance, $targetStep, $ctx->user, $ctx->decision);
+                    } elseif ($targetStep->isAutoExecutable()) {
+                        $this->autoStepExecutor->execute($instance, $targetStep, $ctx->user);
+                    }
+                } else {
+                    $this->logger->debug('Step activation hook advanced instance — skipping engine continuation', [
+                        'instance_id' => $instance->id,
+                        'step_key'    => $targetStep->key,
+                    ]);
                 }
             }
 
@@ -616,6 +693,12 @@ class DynaflowEngine
         if (! $instance->isPending()) {
             throw new Exception('Dynaflow instance is not pending');
         }
+
+        $this->logger->debug('Cancellation requested', [
+            'instance_id' => $instance->id,
+            'decision'    => $decision,
+            'user_id'     => $user->getKey(),
+        ]);
 
         $sourceStep = $instance->currentStep;
 
@@ -675,6 +758,8 @@ class DynaflowEngine
         // Status priority: step config > decision
         $status = $ctx->targetStep->workflow_status ?? $ctx->decision;
 
+        $this->logger->debug('Workflow completed', ['instance_id' => $instance->id, 'status' => $status]);
+
         $instance->update([
             'status'       => $status,
             'completed_at' => now(),
@@ -718,6 +803,113 @@ class DynaflowEngine
     }
 
     /**
+     * Automatically skip an inactive step and advance to the next one.
+     * Creates a bypassed execution record for audit trail.
+     * Throws if the inactive step has zero or multiple outgoing transitions (ambiguous).
+     *
+     * @throws Exception
+     */
+    private function skipInactiveStep(
+        DynaflowInstance $instance,
+        DynaflowStep $skippedStep,
+        mixed $user,
+        string $decision = 'auto_advance'
+    ): void {
+        $transitions = $skippedStep->allowedTransitions()->get();
+
+        if ($transitions->isEmpty()) {
+            throw new Exception("Cannot skip inactive step '{$skippedStep->key}': it has no outgoing transitions");
+        }
+
+        if ($transitions->count() > 1) {
+            throw new Exception("Cannot skip inactive step '{$skippedStep->key}': multiple outgoing transitions are ambiguous — ensure inactive steps have exactly one transition");
+        }
+
+        $nextStep = $transitions->first();
+
+        $this->logger->debug('Skipping inactive step', [
+            'instance_id' => $instance->id,
+            'from_key'    => $skippedStep->key,
+            'to_key'      => $nextStep->key,
+        ]);
+
+        DynaflowStepExecution::create([
+            'dynaflow_instance_id' => $instance->id,
+            'dynaflow_step_id'     => $skippedStep->id,
+            'executed_by_type'     => $user->getMorphClass(),
+            'executed_by_id'       => $user->getKey(),
+            'decision'             => 'skipped',
+            'note'                 => 'Step automatically skipped (inactive)',
+            'bypassed'             => true,
+            'duration'             => 0,
+            'execution_started_at' => now(),
+            'executed_at'          => now(),
+        ]);
+
+        $instance->update([
+            'current_step_id' => $nextStep->id,
+            'step_started_at' => now(),
+        ]);
+
+        // Reload before hooks to clear any stale currentStep relationship cache.
+        // Without this, if a prior hook called transitionTo() (which caches currentStep),
+        // subsequent hook invocations in the skip chain would see the wrong source step.
+        $instance = $instance->fresh();
+
+        $this->hookManager->runStepActivatedHooks($instance, $nextStep, $user);
+
+        // Reload after hooks — a hook may have called transitionTo() and advanced the instance.
+        $instance = $instance->fresh();
+
+        // Only proceed if the hook didn't already advance past this step
+        if ($instance->current_step_id === $nextStep->id) {
+            $this->logger->debug('Step activated', ['instance_id' => $instance->id, 'step_key' => $nextStep->key]);
+
+            if ($nextStep->is_final) {
+                $ctx = new DynaflowContext(
+                    instance: $instance,
+                    targetStep: $nextStep,
+                    decision: $decision,
+                    user: $user,
+                    sourceStep: $skippedStep,
+                    execution: null,
+                    notes: null,
+                    data: [],
+                    isBypassed: false
+                );
+                $this->completeWorkflow($instance, $ctx);
+            } elseif ($nextStep->isSkippable()) {
+                $this->skipInactiveStep($instance, $nextStep, $user, $decision);
+            } elseif ($nextStep->isAutoExecutable()) {
+                $this->autoStepExecutor->execute($instance, $nextStep, $user);
+            }
+        } else {
+            $this->logger->debug('Step activation hook advanced instance — skipping engine continuation', [
+                'instance_id' => $instance->id,
+                'step_key'    => $nextStep->key,
+            ]);
+        }
+    }
+
+    /**
+     * Resolve which Dynaflow to run for the given topic/action.
+     * First checks registered resolver callbacks, then falls back to the DB query.
+     */
+    private function resolveWorkflow(string $topic, string $action, ?Model $model, array $data, mixed $user): ?Dynaflow
+    {
+        $resolved = $this->hookManager->resolveWorkflow($topic, $action, $model, $data, $user);
+
+        if ($resolved !== null) {
+            return $resolved;
+        }
+
+        return Dynaflow::where('topic', $topic)
+            ->where('action', $action)
+            ->where('active', true)
+            ->first();
+    }
+
+    /**
      * Apply changes directly without workflow (no workflow configured or user has exception).
      * Executes completion hooks to perform the actual action.
      *
@@ -725,8 +917,13 @@ class DynaflowEngine
      */
     protected function applyDirectly(string $topic, string $action, ?Model $model, array $data, mixed $user): mixed
     {
+        $this->logger->debug('Applying directly', ['topic' => $topic, 'action' => $action]);
+
+        $instanceModel = dynaflowInstanceModel();
+        $dataModel     = dynaflowDataModel();
+
         // Create a temporary instance for the hook to access data
-        $tempInstance = new DynaflowInstance([
+        $tempInstance = new $instanceModel([
             'dynaflow_id' => null,
             'model_type'  => $model?->getMorphClass(),
             'model_id'    => $model?->getKey(),
@@ -734,7 +931,7 @@ class DynaflowEngine
         ]);
 
         // Attach a temporary dynaflowData relation
-        $tempData = new DynaflowData(['data' => $data]);
+        $tempData = new $dataModel(['data' => $data]);
         $tempInstance->setRelation('dynaflowData', $tempData);
         $tempInstance->setRelation('model', $model);
 
@@ -746,14 +943,14 @@ class DynaflowEngine
         $tempStep = new DynaflowStep([
             'name'            => 'Direct Application',
             'is_final'        => true,
-            'workflow_status' => 'completed',
+            'workflow_status' => DynaflowStatus::COMPLETED->value,
         ]);
 
         // Create context for direct application
         $ctx = new DynaflowContext(
             instance: $tempInstance,
             targetStep: $tempStep,
-            decision: 'approved', // Direct application is considered approved
+            decision: DynaflowStatus::APPROVED->value, // Direct application is considered approved
             user: $user,
             sourceStep: null,
             execution: null,

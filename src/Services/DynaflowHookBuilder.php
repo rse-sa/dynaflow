@@ -16,6 +16,7 @@ use RSE\DynaFlow\Services\Builders\CompleteHookBuilder;
 use RSE\DynaFlow\Services\Builders\ExceptionResolverBuilder;
 use RSE\DynaFlow\Services\Builders\StepActivatedHookBuilder;
 use RSE\DynaFlow\Services\Builders\TransitionHookBuilder;
+use RSE\DynaFlow\Services\Builders\WorkflowResolverBuilder;
 
 /**
  * Fluent interface for registering Dynaflow hooks.
@@ -349,6 +350,21 @@ class DynaflowHookBuilder
     public function resolveAssigneesUsing(): AssigneeResolverBuilder
     {
         return new AssigneeResolverBuilder(
+            $this->manager,
+            $this->topic ?? '*',
+            $this->action ?? '*'
+        );
+    }
+
+    /**
+     * Register a workflow resolver callback.
+     *
+     * Return a Dynaflow instance from the callback to use it,
+     * or null to fall back to the default topic/action query.
+     */
+    public function resolveWorkflowUsing(): WorkflowResolverBuilder
+    {
+        return new WorkflowResolverBuilder(
             $this->manager,
             $this->topic ?? '*',
             $this->action ?? '*'

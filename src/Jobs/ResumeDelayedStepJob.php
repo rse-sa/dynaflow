@@ -50,7 +50,7 @@ class ResumeDelayedStepJob implements ShouldQueue
         $instance = $this->instance->fresh();
 
         // Skip if instance is no longer pending
-        if ($instance->status !== 'pending') {
+        if (! $instance->isPending()) {
             Log::info('ResumeDelayedStepJob skipped: instance no longer pending', [
                 'instance_id' => $instance->id,
                 'status' => $instance->status,

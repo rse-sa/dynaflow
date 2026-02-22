@@ -33,6 +33,6 @@ class AuthorizationResolverBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->authorizeStepFor($this->topic, $this->action, $callback);
+        $this->manager->pushAuthorizationResolver($this->topic, $this->action, $callback);
     }
 }

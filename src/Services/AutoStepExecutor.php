@@ -2,7 +2,6 @@
 
 namespace RSE\DynaFlow\Services;
 
-use Exception;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RSE\DynaFlow\Contracts\ActionResult;
@@ -341,7 +340,7 @@ class AutoStepExecutor
         $ctx = new DynaflowContext(
             instance: $instance,
             targetStep: $finalStep,
-            decision: 'completed',
+            decision: DynaflowStatus::COMPLETED->value,
             user: $instance->triggeredBy,
             sourceStep: null,
             execution: null,

@@ -37,17 +37,11 @@ class StepActivatedHookBuilder
      */
     public function execute(Closure $callback): void
     {
-        if ($this->topic !== null && $this->action !== null) {
-            // Scoped registration
-            $this->manager->onStepActivatedFor(
-                $this->topic,
-                $this->action,
-                $this->stepIdentifier,
-                $callback
-            );
-        } else {
-            // Global registration
-            $this->manager->onStepActivated($this->stepIdentifier, $callback);
-        }
+        $this->manager->pushStepActivatedHook(
+            $this->topic ?? '*',
+            $this->action ?? '*',
+            $this->stepIdentifier,
+            $callback
+        );
     }
 }

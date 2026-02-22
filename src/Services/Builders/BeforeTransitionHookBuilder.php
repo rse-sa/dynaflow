@@ -55,6 +55,6 @@ class BeforeTransitionHookBuilder
      */
     public function execute(Closure $callback): void
     {
-        $this->manager->beforeTransitionTo($this->stepIdentifier, $callback);
+        $this->manager->pushBeforeTransitionToHook($this->stepIdentifier, $callback);
     }
 }
