@@ -252,7 +252,7 @@ class AutoStepExecutor
         DynaflowInstance $instance,
         DynaflowStep $step
     ): ActionResult {
-        Log::error("Auto-step execution failed", [
+        Log::error('Auto-step execution failed', [
             'instance_id' => $instance->id,
             'step_id'     => $step->id,
             'step_key'    => $step->key,

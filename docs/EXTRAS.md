@@ -118,6 +118,7 @@ The model provides semantic helper methods:
 ```php
 // Individual checks
 $instance->isPending();        // pending
+$instance->isClosed();         // NOT pending (any terminal state)
 $instance->isApproved();       // completed OR approved OR auto_approved
 $instance->isCompleted();      // same as isApproved()
 $instance->isRejected();       // rejected OR auto_rejected
@@ -132,6 +133,7 @@ $instance->isTerminated();     // cancelled OR rejected OR auto_rejected
 ```php
 // Query by status group
 DynaflowInstance::pending()->get();
+DynaflowInstance::closed()->get();         // NOT pending (any terminal state)
 DynaflowInstance::approved()->get();       // completed, approved, auto_approved
 DynaflowInstance::rejected()->get();       // rejected, auto_rejected
 DynaflowInstance::terminated()->get();     // cancelled, rejected, auto_rejected

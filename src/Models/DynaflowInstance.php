@@ -117,9 +117,19 @@ class DynaflowInstance extends Model
         return $builder->whereRelation('dynaflow', 'topic', $topic);
     }
 
+    public function scopeClosed(Builder $builder): Builder
+    {
+        return $builder->where('status', '!=', DynaflowStatus::PENDING->value);
+    }
+
     public function isPending(): bool
     {
         return $this->status === DynaflowStatus::PENDING->value;
+    }
+
+    public function isClosed(): bool
+    {
+        return !$this->isPending();
     }
 
     public function isCompleted(): bool
