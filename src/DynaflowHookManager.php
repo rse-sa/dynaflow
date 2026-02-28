@@ -428,6 +428,7 @@ class DynaflowHookManager
             'model'       => $ctx->model(),
             'data'        => $ctx->pendingData(),
             'workflow'    => $ctx->instance->dynaflow,
+            'metadata'    => $ctx->instance->metadata ?? [],
         ];
     }
 
@@ -812,8 +813,38 @@ class DynaflowHookManager
             ]);
         }
 
-        foreach ($hooks as $hook) {
+        $instanceAdvancedWarned = false;
+
+        foreach ($hooks as $index => $hook) {
             $this->invoker->invoke($hook, $available);
+
+            // Reload after each hook — it may have called transitionTo() and advanced the instance.
+            // Always update $available so subsequent hooks receive the current instance state.
+            $freshInstance = $available['instance']->fresh();
+
+            $wasAdvanced = ! $freshInstance->isPending()
+                || $freshInstance->current_step_id !== $step->id;
+
+            if ($wasAdvanced && ! $instanceAdvancedWarned) {
+                $remainingCount = count($hooks) - $index - 1;
+
+                if ($remainingCount > 0) {
+                    $this->logger->warning(
+                        'onStepActivated hook advanced the instance — subsequent hooks receive the updated instance',
+                        [
+                            'instance_id'     => $freshInstance->id,
+                            'step_key'        => $step->key,
+                            'advanced_to'     => $freshInstance->current_step_id,
+                            'remaining_hooks' => $remainingCount,
+                            'tip'             => 'Add $instance->fresh()->isPending() check before calling transitionTo() in hooks that auto-advance, to prevent crashes when multiple hooks share the same step.',
+                        ]
+                    );
+                }
+
+                $instanceAdvancedWarned = true;
+            }
+
+            $available['instance'] = $freshInstance;
         }
     }
 

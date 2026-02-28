@@ -32,6 +32,7 @@ trait UsesDynaflow
      * @param  Model|null  $model  The model (null for actions that don't involve a specific model instance)
      * @param  array  $data  The data for the action
      * @param  mixed|null  $user  The user performing the action (defaults to auth user)
+     * @param  array  $metadata  Optional metadata to store with the workflow instance
      * @return Model|DynaflowInstance Returns the result (model) or workflow instance
      *
      * @throws \Throwable
@@ -45,13 +46,17 @@ trait UsesDynaflow
      *
      * // Custom action
      * $result = $this->processDynaflow(Post::class, 'publish', $post, ['published_at' => now()]);
+     *
+     * // With metadata
+     * $result = $this->processDynaflow(Post::class, 'create', null, $validated, null, ['priority' => 'high']);
      */
     protected function processDynaflow(
         string $topic,
         string $action,
         ?Model $model = null,
         array $data = [],
-        $user = null
+        mixed $user = null,
+        array $metadata = []
     ): mixed {
         $user   = $user ?? auth()->user();
         $engine = app(DynaflowEngine::class);
@@ -61,7 +66,8 @@ trait UsesDynaflow
             action: $action,
             model: $model,
             data: $data,
-            user: $user
+            user: $user,
+            metadata: $metadata
         );
     }
 

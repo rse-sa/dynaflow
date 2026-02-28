@@ -102,6 +102,25 @@ class PostController extends Controller
 
         return $this->dynaflowResponse($result);
     }
+
+    // With metadata
+    public function storeUrgent(Request $request)
+    {
+        $validated = $request->validate([
+            'title' => 'required',
+            'content' => 'required',
+        ]);
+
+        $result = $this->processDynaflow(
+            topic: Post::class,
+            action: 'create',
+            model: null,
+            data: $validated,
+            metadata: ['priority' => 'urgent', 'source' => 'api']
+        );
+
+        return $this->dynaflowResponse($result);
+    }
 }
 ```
 
@@ -197,6 +216,37 @@ Dynaflow::builder()
             'status' => 'published',
             'published_at' => now(),
         ]);
+    });
+```
+
+## Workflow Metadata
+
+Attach custom contextual information to workflow instances:
+
+```php
+// Pass metadata when triggering
+$result = $this->processDynaflow(
+    topic: Post::class,
+    action: 'create',
+    model: null,
+    data: $validated,
+    metadata: [
+        'priority' => 'high',
+        'source' => 'api',
+        'reference_id' => $request->ref_id,
+    ]
+);
+
+// Access in hooks
+Dynaflow::forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        if ($ctx->meta('priority') === 'high') {
+            // Send urgent notification
+        }
+
+        $source = $ctx->meta('source'); // 'api'
+        $allMeta = $ctx->meta();        // Full array
     });
 ```
 

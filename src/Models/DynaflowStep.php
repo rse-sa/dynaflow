@@ -11,6 +11,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use RSE\DynaFlow\Database\Factories\DynaflowStepFactory;
 use Spatie\Translatable\HasTranslations;
 
+/**
+ * @var string|null $name
+ * @var string|null $description
+ */
 #[UseFactory(DynaflowStepFactory::class)]
 class DynaflowStep extends Model
 {

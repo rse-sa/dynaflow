@@ -5,6 +5,7 @@ namespace RSE\DynaFlow\Tests\Feature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Log;
 use RSE\DynaFlow\DynaflowHookManager;
+use RSE\DynaFlow\Exceptions\StepActivationLoopException;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
@@ -287,6 +288,99 @@ class StepActivationHookTest extends TestCase
         // Workflow should be completed (step4 is final)
         $instance->refresh();
         $this->assertTrue($instance->isCompleted());
+    }
+
+    /**
+     * When two hooks are registered for the same step and the first hook calls
+     * transitionTo() (advancing the instance), subsequent hooks still execute
+     * but receive the refreshed instance.
+     *
+     * This allows notification/field-update hooks registered after an auto-approve
+     * hook to still run. Hooks that call transitionTo() themselves must guard with
+     * $instance->isPending() to avoid crashing (application-side responsibility).
+     *
+     * The package logs a WARNING so developers are aware one hook advanced the
+     * instance while others are still running.
+     */
+    public function test_subsequent_hooks_still_run_after_first_hook_advances_instance(): void
+    {
+        $user  = User::factory()->create();
+        $steps = $this->buildLinearWorkflow($user, 2);
+        [$step1, $step2] = $steps;
+
+        $model = TestModel::factory()->create();
+
+        $this->hookManager->onComplete(TestModel::class, 'update', function () {});
+
+        $secondHookReceivedInstance = null;
+
+        // Hook 1: auto-approve — advances the instance to step2 (final)
+        $this->hookManager->onStepActivatedFor(
+            TestModel::class, 'update', $step1->key,
+            function (DynaflowInstance $instance) use ($step2, $user) {
+                $this->engine->transitionTo($instance->fresh(), $step2, $user, 'auto_skip');
+            }
+        );
+
+        // Hook 2: non-transition logic (e.g. notification) — must still run,
+        // and must receive the fresh (completed) instance, not the stale one.
+        $this->hookManager->onStepActivatedFor(
+            TestModel::class, 'update', $step1->key,
+            function (DynaflowInstance $instance) use (&$secondHookReceivedInstance) {
+                $secondHookReceivedInstance = $instance->fresh();
+            }
+        );
+
+        $instance = $this->engine->trigger(TestModel::class, 'update', $model, ['_marker' => 1], $user);
+
+        // Workflow should be completed by hook 1
+        $instance->refresh();
+        $this->assertEquals('auto_skip', $instance->status);
+
+        // Hook 2 must have run and received the updated (completed) instance
+        $this->assertNotNull($secondHookReceivedInstance, 'Second hook must still execute');
+        $this->assertEquals('auto_skip', $secondHookReceivedInstance->status);
+
+        // Exactly one execution record (step1 → step2 by hook 1)
+        $this->assertDatabaseCount('dynaflow_step_executions', 1);
+    }
+
+    /**
+     * When a hook calls transitionTo() from within onStepActivated and the nested
+     * call would re-enter activation of the same (instance, step) pair, the engine
+     * must throw StepActivationLoopException with a clear developer message.
+     *
+     * Scenario: step2 has a hook that calls transitionTo(step2) — a self-loop
+     * (requires step2 → step2 allowed transition to be set up).
+     * Without the guard this would recurse until stack overflow.
+     */
+    public function test_reentrancy_guard_throws_on_hook_self_loop(): void
+    {
+        $user  = User::factory()->create();
+        $steps = $this->buildLinearWorkflow($user, 3);
+        [$step1, $step2, $step3] = $steps;
+
+        // Allow step2 → step2 so that transitionTo(step2) from within step2's hook is valid
+        $step2->allowedTransitions()->attach($step2->id);
+
+        $model = TestModel::factory()->create();
+
+        $this->hookManager->onComplete(TestModel::class, 'update', function () {});
+
+        $this->hookManager->onStepActivatedFor(
+            TestModel::class, 'update', $step2->key,
+            function (DynaflowInstance $instance) use ($step2, $user) {
+                // Attempt a self-loop — the engine must throw, not recurse infinitely
+                $this->engine->transitionTo($instance->fresh(), $step2, $user, 'self_loop');
+            }
+        );
+
+        $instance = $this->engine->trigger(TestModel::class, 'update', $model, ['_marker' => 1], $user);
+
+        $this->expectException(StepActivationLoopException::class);
+        $this->expectExceptionMessageMatches("/step '{$step2->key}'/");
+
+        $this->engine->transitionTo($instance->fresh(), $step2, $user, 'approved');
     }
 
     /**

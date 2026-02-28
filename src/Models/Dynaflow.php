@@ -12,6 +12,10 @@ use RSE\DynaFlow\Database\Factories\DynaflowFactory;
 use RSE\DynaFlow\Enums\BypassMode;
 use Spatie\Translatable\HasTranslations;
 
+/**
+ * @var string|null $name
+ * @var string|null $description
+ */
 #[UseFactory(DynaflowFactory::class)]
 class Dynaflow extends Model
 {

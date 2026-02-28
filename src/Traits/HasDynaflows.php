@@ -23,7 +23,7 @@ trait HasDynaflows
         return $this
             ->morphOne(dynaflowInstanceModel(), 'model')
             ->where('status', DynaflowStatus::PENDING->value)
-            ->latestOfMany();
+            ->latestOfMany('id');
     }
 
     public function getWithPendingChanges(): array

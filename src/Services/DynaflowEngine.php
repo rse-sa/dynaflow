@@ -14,6 +14,7 @@ use RSE\DynaFlow\Events\DynaflowCancelled;
 use RSE\DynaFlow\Events\DynaflowCompleted;
 use RSE\DynaFlow\Events\DynaflowStarted;
 use RSE\DynaFlow\Events\StepTransitioned;
+use RSE\DynaFlow\Exceptions\StepActivationLoopException;
 use RSE\DynaFlow\Models\Dynaflow;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
@@ -35,9 +36,17 @@ class DynaflowEngine
     }
 
     /**
+     * Tracks (instance_id:step_id) pairs currently being activated.
+     * Used by activateStep() to detect and throw on recursive re-entry.
+     *
+     * @var array<string, bool>
+     */
+    protected array $activatingSteps = [];
+
+    /**
      * @throws \Throwable
      */
-    public function trigger(string $topic, string $action, ?Model $model, array $data, $user): mixed
+    public function trigger(string $topic, string $action, ?Model $model, array $data, $user, array $metadata = []): mixed
     {
         $this->logger->debug('Trigger requested', [
             'topic'    => $topic,
@@ -51,7 +60,7 @@ class DynaflowEngine
         if (! $workflow) {
             $this->logger->debug('No workflow — applying directly', ['topic' => $topic, 'action' => $action]);
 
-            return $this->applyDirectly($topic, $action, $model, $data, $user);
+            return $this->applyDirectly($topic, $action, $model, $data, $user, $metadata);
         }
 
         $this->logger->debug('Workflow resolved', ['workflow_id' => $workflow->id, 'workflow' => $workflow->name]);
@@ -61,10 +70,10 @@ class DynaflowEngine
             $this->logger->debug('Bypass detected', ['mode' => $bypassMode, 'user_id' => $user->getKey()]);
 
             return match ($bypassMode) {
-                BypassMode::DIRECT_COMPLETE->value => $this->triggerWithDirectComplete($workflow, $model, $data, $user),
-                BypassMode::AUTO_FOLLOW->value     => $this->triggerWithAutoFollow($workflow, $model, $data, $user),
-                BypassMode::CUSTOM_STEPS->value    => $this->triggerWithCustomSteps($workflow, $model, $data, $user),
-                default                            => $this->applyDirectly($topic, $action, $model, $data, $user),
+                BypassMode::DIRECT_COMPLETE->value => $this->triggerWithDirectComplete($workflow, $model, $data, $user, $metadata),
+                BypassMode::AUTO_FOLLOW->value     => $this->triggerWithAutoFollow($workflow, $model, $data, $user, $metadata),
+                BypassMode::CUSTOM_STEPS->value    => $this->triggerWithCustomSteps($workflow, $model, $data, $user, $metadata),
+                default                            => $this->applyDirectly($topic, $action, $model, $data, $user, $metadata),
             };
         }
 
@@ -73,7 +82,7 @@ class DynaflowEngine
             if (! $this->shouldTriggerBasedOnFields($workflow, $model, $data)) {
                 $this->logger->debug('Trigger skipped: field filter', ['topic' => $topic, 'action' => $action]);
 
-                return $this->applyDirectly($topic, $action, $model, $data, $user);
+                return $this->applyDirectly($topic, $action, $model, $data, $user, $metadata);
             }
         }
 
@@ -81,10 +90,10 @@ class DynaflowEngine
         if (! $this->hookManager->runBeforeTriggerHooks($workflow, $model, $data, $user)) {
             $this->logger->debug('Trigger skipped: beforeTrigger returned false', ['topic' => $topic, 'action' => $action]);
 
-            return $this->applyDirectly($topic, $action, $model, $data, $user);
+            return $this->applyDirectly($topic, $action, $model, $data, $user, $metadata);
         }
 
-        return DB::transaction(function () use ($workflow, $model, $data, $user) {
+        return DB::transaction(function () use ($workflow, $model, $data, $user, $metadata) {
             // Check for duplicates only if model exists
             if ($model && $model->exists) {
                 $duplicateInstance = $this->validator->getActiveDuplicateInstance($workflow, $model);
@@ -102,6 +111,7 @@ class DynaflowEngine
                 'triggered_by_id'   => $user->getKey(),
                 'current_step_id'   => $workflow->steps->first()?->id,
                 'step_started_at'   => now(),
+                'metadata'          => $metadata,
             ]);
 
             $this->logger->debug('Instance created', [
@@ -125,27 +135,7 @@ class DynaflowEngine
 
             if ($firstStep) {
                 $this->logger->debug('Step activated', ['instance_id' => $instance->id, 'step_key' => $firstStep->key]);
-
-                // Run step activated hooks
-                $this->hookManager->runStepActivatedHooks($instance, $firstStep, $user);
-
-                // Reload after hooks — a hook may have called transitionTo() and advanced
-                // the instance, which would leave $instance with a stale currentStep cache.
-                $instance = $instance->fresh();
-
-                // Only proceed if the hook didn't already advance past this step
-                if ($instance->current_step_id === $firstStep->id) {
-                    if ($firstStep->isSkippable()) {
-                        $this->skipInactiveStep($instance, $firstStep, $user);
-                    } elseif ($firstStep->isAutoExecutable()) {
-                        $this->autoStepExecutor->execute($instance, $firstStep, $user);
-                    }
-                } else {
-                    $this->logger->debug('Step activation hook advanced instance — skipping engine continuation', [
-                        'instance_id' => $instance->id,
-                        'step_key'    => $firstStep->key,
-                    ]);
-                }
+                $this->activateStep($instance, $firstStep, $user);
             }
 
             return $instance->fresh();
@@ -162,9 +152,10 @@ class DynaflowEngine
         Dynaflow $workflow,
         ?Model $model,
         array $data,
-        mixed $user
+        mixed $user,
+        array $metadata = []
     ): DynaflowInstance {
-        return DB::transaction(function () use ($workflow, $model, $data, $user) {
+        return DB::transaction(function () use ($workflow, $model, $data, $user, $metadata) {
             // Cancel duplicates
             if ($model && $model->exists) {
                 $this->validator->getActiveDuplicateInstance($workflow, $model)
@@ -188,6 +179,7 @@ class DynaflowEngine
                 'triggered_by_id'   => $user->getKey(),
                 'current_step_id'   => $finalStep->id,
                 'step_started_at'   => now(),
+                'metadata'          => $metadata,
             ]);
 
             $dataModel = dynaflowDataModel();
@@ -253,9 +245,10 @@ class DynaflowEngine
         Dynaflow $workflow,
         ?Model $model,
         array $data,
-        mixed $user
+        mixed $user,
+        array $metadata = []
     ): DynaflowInstance {
-        return DB::transaction(function () use ($workflow, $model, $data, $user) {
+        return DB::transaction(function () use ($workflow, $model, $data, $user, $metadata) {
             // Validate workflow is linear
             if (! $workflow->isLinear()) {
                 throw new Exception(
@@ -289,6 +282,7 @@ class DynaflowEngine
                 'triggered_by_id'   => $user->getKey(),
                 'current_step_id'   => $firstStep->id,
                 'step_started_at'   => now(),
+                'metadata'          => $metadata,
             ]);
 
             $dataModel = dynaflowDataModel();
@@ -383,9 +377,10 @@ class DynaflowEngine
         Dynaflow $workflow,
         ?Model $model,
         array $data,
-        mixed $user
+        mixed $user,
+        array $metadata = []
     ): DynaflowInstance {
-        return DB::transaction(function () use ($workflow, $model, $data, $user) {
+        return DB::transaction(function () use ($workflow, $model, $data, $user, $metadata) {
             $customStepKeys = $workflow->getBypassSteps();
 
             if (empty($customStepKeys)) {
@@ -430,6 +425,7 @@ class DynaflowEngine
                 'triggered_by_id'   => $user->getKey(),
                 'current_step_id'   => $steps[0]->id,
                 'step_started_at'   => now(),
+                'metadata'          => $metadata,
             ]);
 
             $dataModel = dynaflowDataModel();
@@ -648,27 +644,7 @@ class DynaflowEngine
                 $instance = $instance->fresh();
 
                 $this->logger->debug('Step activated', ['instance_id' => $instance->id, 'step_key' => $targetStep->key]);
-
-                // Run step activated hooks for the new step
-                $this->hookManager->runStepActivatedHooks($instance, $targetStep, $ctx->user);
-
-                // Reload after hooks — a hook may have called transitionTo() and advanced
-                // the instance, leaving stale currentStep cache on the object we hold.
-                $instance = $instance->fresh();
-
-                // Only proceed if the hook didn't already advance past this step
-                if ($instance->current_step_id === $targetStep->id) {
-                    if ($targetStep->isSkippable()) {
-                        $this->skipInactiveStep($instance, $targetStep, $ctx->user, $ctx->decision);
-                    } elseif ($targetStep->isAutoExecutable()) {
-                        $this->autoStepExecutor->execute($instance, $targetStep, $ctx->user);
-                    }
-                } else {
-                    $this->logger->debug('Step activation hook advanced instance — skipping engine continuation', [
-                        'instance_id' => $instance->id,
-                        'step_key'    => $targetStep->key,
-                    ]);
-                }
+                $this->activateStep($instance, $targetStep, $ctx->user, $ctx->decision);
             }
 
             event(new StepTransitioned($ctx));
@@ -851,43 +827,75 @@ class DynaflowEngine
             'step_started_at' => now(),
         ]);
 
-        // Reload before hooks to clear any stale currentStep relationship cache.
-        // Without this, if a prior hook called transitionTo() (which caches currentStep),
-        // subsequent hook invocations in the skip chain would see the wrong source step.
+        // Reload before activating to clear any stale relationship cache.
         $instance = $instance->fresh();
 
-        $this->hookManager->runStepActivatedHooks($instance, $nextStep, $user);
+        $this->logger->debug('Step activated', ['instance_id' => $instance->id, 'step_key' => $nextStep->key]);
+        $this->activateStep($instance, $nextStep, $user, $decision, $skippedStep);
+    }
 
-        // Reload after hooks — a hook may have called transitionTo() and advanced the instance.
-        $instance = $instance->fresh();
+    /**
+     * Activate a step: run onStepActivated hooks, then continue execution if
+     * hooks did not already advance the instance.
+     *
+     * Re-entrancy guard: if the same (instance, step) pair is already being
+     * activated higher in the call stack (e.g. a hook called transitionTo()
+     * which routed back here), skip hooks to prevent infinite loops.
+     *
+     * @param DynaflowStep|null $sourceStep  Only needed when called from skipInactiveStep,
+     *                                       so that completeWorkflow() has the correct sourceStep
+     *                                       in its context.
+     */
+    private function activateStep(
+        DynaflowInstance $instance,
+        DynaflowStep $step,
+        mixed $user,
+        string $decision = 'auto_advance',
+        ?DynaflowStep $sourceStep = null
+    ): void {
+        $activationKey = $instance->id . ':' . $step->id;
 
-        // Only proceed if the hook didn't already advance past this step
-        if ($instance->current_step_id === $nextStep->id) {
-            $this->logger->debug('Step activated', ['instance_id' => $instance->id, 'step_key' => $nextStep->key]);
+        if (isset($this->activatingSteps[$activationKey])) {
+            throw new StepActivationLoopException((string) $instance->id, $step->key);
+        }
 
-            if ($nextStep->is_final) {
-                $ctx = new DynaflowContext(
-                    instance: $instance,
-                    targetStep: $nextStep,
-                    decision: $decision,
-                    user: $user,
-                    sourceStep: $skippedStep,
-                    execution: null,
-                    notes: null,
-                    data: [],
-                    isBypassed: false
-                );
-                $this->completeWorkflow($instance, $ctx);
-            } elseif ($nextStep->isSkippable()) {
-                $this->skipInactiveStep($instance, $nextStep, $user, $decision);
-            } elseif ($nextStep->isAutoExecutable()) {
-                $this->autoStepExecutor->execute($instance, $nextStep, $user);
+        $this->activatingSteps[$activationKey] = true;
+
+        try {
+            $this->hookManager->runStepActivatedHooks($instance, $step, $user);
+
+            $instance = $instance->fresh();
+
+            if ($instance->current_step_id === $step->id) {
+                if ($step->is_final && $sourceStep !== null) {
+                    // Only reached when skipping an inactive step that leads directly to a final step.
+                    // trigger() and transitionTo() handle final steps before calling activateStep().
+                    $ctx = new DynaflowContext(
+                        instance:   $instance,
+                        targetStep: $step,
+                        decision:   $decision,
+                        user:       $user,
+                        sourceStep: $sourceStep,
+                        execution:  null,
+                        notes:      null,
+                        data:       [],
+                        isBypassed: false
+                    );
+                    $this->completeWorkflow($instance, $ctx);
+                } elseif ($step->isSkippable()) {
+                    $this->skipInactiveStep($instance, $step, $user, $decision);
+                } elseif ($step->isAutoExecutable()) {
+                    $this->autoStepExecutor->execute($instance, $step, $user);
+                }
+            } else {
+                $this->logger->debug('Step activation hook advanced instance — skipping engine continuation', [
+                    'instance_id'         => $instance->id,
+                    'step_key'            => $step->key,
+                    'advanced_to_step_id' => $instance->current_step_id,
+                ]);
             }
-        } else {
-            $this->logger->debug('Step activation hook advanced instance — skipping engine continuation', [
-                'instance_id' => $instance->id,
-                'step_key'    => $nextStep->key,
-            ]);
+        } finally {
+            unset($this->activatingSteps[$activationKey]);
         }
     }
 
@@ -915,7 +923,7 @@ class DynaflowEngine
      *
      * @return mixed The result from the completion hook (usually the model)
      */
-    protected function applyDirectly(string $topic, string $action, ?Model $model, array $data, mixed $user): mixed
+    protected function applyDirectly(string $topic, string $action, ?Model $model, array $data, mixed $user, array $metadata = []): mixed
     {
         $this->logger->debug('Applying directly', ['topic' => $topic, 'action' => $action]);
 
@@ -928,6 +936,7 @@ class DynaflowEngine
             'model_type'  => $model?->getMorphClass(),
             'model_id'    => $model?->getKey(),
             'status'      => DynaflowStatus::COMPLETED->value,
+            'metadata'    => $metadata,
         ]);
 
         // Attach a temporary dynaflowData relation

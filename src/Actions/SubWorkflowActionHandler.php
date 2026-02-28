@@ -30,6 +30,7 @@ class SubWorkflowActionHandler implements ActionHandler
         $topic = $config['topic'] ?? null;
         $action = $config['action'] ?? null;
         $waitForCompletion = $config['wait_for_completion'] ?? false;
+        $metadata = $config['metadata'] ?? [];
 
         if (! $topic || ! $action) {
             return ActionResult::failed('Sub-workflow topic and action are required');
@@ -68,7 +69,8 @@ class SubWorkflowActionHandler implements ActionHandler
                 action: $action,
                 model: $model,
                 data: $data,
-                user: $ctx->user
+                user: $ctx->user,
+                metadata: $metadata
             );
 
             // If result is a DynaflowInstance, a workflow was started
@@ -149,6 +151,12 @@ class SubWorkflowActionHandler implements ActionHandler
                     'title' => 'Wait for Completion',
                     'description' => 'If true, parent workflow waits until sub-workflow completes.',
                     'default' => false,
+                ],
+                'metadata' => [
+                    'type' => 'object',
+                    'title' => 'Metadata',
+                    'description' => 'Optional metadata to attach to the sub-workflow instance.',
+                    'additionalProperties' => true,
                 ],
             ],
         ];

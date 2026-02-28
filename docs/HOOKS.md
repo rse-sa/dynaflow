@@ -65,7 +65,7 @@ Dynaflow::builder()
 
 | Hook Type | Available Parameters |
 |-----------|---------------------|
-| whenCompleted, whenCancelled, beforeTransitionTo, afterTransitionTo, transition | `ctx`, `context`, `instance`, `sourceStep`, `targetStep`, `step`, `decision`, `user`, `execution`, `notes`, `model`, `data`, `workflow` |
+| whenCompleted, whenCancelled, beforeTransitionTo, afterTransitionTo, transition | `ctx`, `context`, `instance`, `sourceStep`, `targetStep`, `step`, `decision`, `user`, `execution`, `notes`, `model`, `data`, `workflow`, `metadata` |
 | beforeTriggering / beforeStarting | `workflow`, `model`, `data`, `user` |
 | afterTriggering / whenStarted | `workflow`, `instance`, `model`, `user` |
 | whenStepActivated | `instance`, `step`, `workflow`, `user`, `model` |
@@ -80,6 +80,91 @@ Dynaflow::builder()
         // $entity gets the Post model instance
     });
 ```
+
+## Workflow Metadata
+
+You can attach custom metadata to workflow instances when triggering them. This metadata is stored in the `metadata` JSON column and accessible in all hooks via `DynaflowContext`.
+
+### Passing Metadata
+
+```php
+// In controller
+$result = $this->processDynaflow(
+    topic: Post::class,
+    action: 'create',
+    model: null,
+    data: $validated,
+    metadata: [
+        'priority' => 'high',
+        'source' => 'api',
+        'reference_id' => $request->ref_id,
+        'tags' => ['urgent', 'legal-review'],
+    ]
+);
+
+// Or using DynaflowEngine directly
+$engine->trigger(
+    topic: Post::class,
+    action: 'update',
+    model: $post,
+    data: $data,
+    user: $user,
+    metadata: ['custom_key' => 'custom_value']
+);
+```
+
+### Accessing Metadata in Hooks
+
+```php
+// Pattern 1: Direct parameter injection (recommended for simple cases)
+Dynaflow::forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (array $metadata) {
+        $priority = $metadata['priority'] ?? 'normal';
+        $source = $metadata['source'] ?? 'unknown';
+
+        if ($priority === 'high') {
+            // Handle high priority workflows
+        }
+    });
+
+// Pattern 2: Via DynaflowContext (recommended when you need other context data)
+Dynaflow::forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx) {
+        // Get specific metadata value
+        $priority = $ctx->meta('priority');  // 'high'
+
+        // Get all metadata as array
+        $allMeta = $ctx->meta();
+        // ['priority' => 'high', 'source' => 'api', ...]
+
+        // Check if key exists (returns null if not found)
+        if ($ctx->meta('urgent_flag')) {
+            // Handle urgent workflows differently
+        }
+    });
+
+// Pattern 3: Mix both - get context and metadata
+Dynaflow::forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (DynaflowContext $ctx, array $metadata) {
+        $model = $ctx->model();
+        $priority = $metadata['priority'] ?? 'normal';
+
+        // Use both together
+        $model->update(['priority' => $priority]);
+    });
+```
+
+### Use Cases for Metadata
+
+- **Priority tracking** - Mark workflows as high/low priority
+- **Source tracking** - Track where the workflow originated (API, web, CLI)
+- **Reference IDs** - Store external system references
+- **Custom tags** - Add tags for filtering and reporting
+- **Routing hints** - Provide hints for custom routing logic
+- **Audit trail** - Store contextual information for compliance
 
 ## Hook Types
 
@@ -109,6 +194,8 @@ Dynaflow::builder()
         $ctx->pendingData();     // Get pending changes
         $ctx->workflowStatus();  // Get workflow status
         $ctx->duration();        // Get execution duration (seconds)
+        $ctx->meta('key');       // Get metadata value by key
+        $ctx->meta();            // Get all metadata as array
 
         // Apply changes based on final step or decision
         if ($ctx->instance->isApproved()) {
@@ -126,6 +213,19 @@ Dynaflow::builder()
 - `execution` - The DynaflowStepExecution record created
 - `notes` - Optional notes provided
 - `data` - Custom context data array
+
+**Helper Methods:**
+- `model()` - Get the model being worked on
+- `pendingData()` - Get pending changes from dynaflow_data table
+- `workflowStatus()` - Get the workflow status
+- `duration()` - Get execution duration in seconds
+- `meta($key)` - Get metadata value by key (returns null if not found)
+- `meta()` - Get all metadata as an array
+- `topic()` - Get the workflow topic
+- `action()` - Get the workflow action
+- `isTransition()` - Check if this is a transition (vs initial state)
+- `isCompleted()` - Check if workflow reached final step
+- `isBypassed()` - Check if workflow was auto-completed via bypass
 
 ### Cancellation Hooks
 

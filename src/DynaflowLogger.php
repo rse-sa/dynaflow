@@ -16,4 +16,11 @@ class DynaflowLogger
         $logger  = $channel ? Log::channel($channel) : Log::getFacadeRoot();
         $logger->debug("[Dynaflow] {$event}", $context);
     }
+
+    public function warning(string $event, array $context = []): void
+    {
+        $channel = config('dynaflow.log_channel');
+        $logger  = $channel ? Log::channel($channel) : Log::getFacadeRoot();
+        $logger->warning("[Dynaflow] {$event}", $context);
+    }
 }

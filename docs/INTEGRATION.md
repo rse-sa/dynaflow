@@ -55,6 +55,68 @@ public function update(Request $request, Post $post)
 
     return $this->dynaflowResponse($result);
 }
+
+// With metadata - attach custom data to the workflow instance
+public function storeWithPriority(Request $request)
+{
+    $validated = $request->validate([...]);
+
+    $result = $this->processDynaflow(
+        topic: Post::class,
+        action: 'create',
+        model: null,
+        data: $validated,
+        metadata: [
+            'priority' => $request->priority ?? 'normal',
+            'source' => 'api',
+            'reference_id' => $request->ref_id,
+        ]
+    );
+
+    return $this->dynaflowResponse($result);
+}
+```
+
+### Workflow Metadata
+
+The `metadata` parameter allows you to attach custom contextual information to workflow instances. This data is stored in the `metadata` JSON column and can be accessed in hooks:
+
+```php
+// In controller - pass metadata when triggering
+$result = $this->processDynaflow(
+    topic: Post::class,
+    action: 'create',
+    model: null,
+    data: $validated,
+    metadata: [
+        'priority' => 'high',
+        'source' => 'api',
+        'reference_id' => $request->ref_id,
+    ]
+);
+
+// In hook - access metadata (two patterns available)
+
+// Pattern 1: Direct parameter injection (cleaner for simple cases)
+Dynaflow::forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function (array $metadata, $model) {
+        $priority = $metadata['priority'] ?? 'normal';
+        $source = $metadata['source'] ?? 'unknown';
+        $refId = $metadata['reference_id'] ?? null;
+    });
+
+// Pattern 2: Via DynaflowContext (useful when you need other context)
+Dynaflow::forWorkflow(Post::class, 'create')
+    ->whenCompleted()
+    ->execute(function ($ctx) {
+        $priority = $ctx->meta('priority');     // 'high'
+        $source = $ctx->meta('source');         // 'api'
+        $refId = $ctx->meta('reference_id');    // the ref_id value
+
+        // Get all metadata as array
+        $allMeta = $ctx->meta();
+    });
 ```
 
 ## Creating Workflows
