@@ -32,7 +32,7 @@ class DynaflowEngine
     ) {
         // Auto-resolve if not injected (for backward compatibility)
         $this->autoStepExecutor ??= app(AutoStepExecutor::class);
-        $this->logger            ??= app(DynaflowLogger::class);
+        $this->logger ??= app(DynaflowLogger::class);
     }
 
     /**
@@ -570,7 +570,7 @@ class DynaflowEngine
 
         if (! $sourceStep->canTransitionTo($targetStep)) {
             $this->logger->debug('Invalid transition', ['from' => $sourceStep->key, 'to' => $targetStep->key]);
-            throw new Exception('Invalid step transition ('. $sourceStep->key .' -> '. $targetStep->key .')');
+            throw new Exception('Invalid step transition (' . $sourceStep->key . ' -> ' . $targetStep->key . ')');
         }
 
         // Create context object
@@ -842,9 +842,9 @@ class DynaflowEngine
      * activated higher in the call stack (e.g. a hook called transitionTo()
      * which routed back here), skip hooks to prevent infinite loops.
      *
-     * @param DynaflowStep|null $sourceStep  Only needed when called from skipInactiveStep,
-     *                                       so that completeWorkflow() has the correct sourceStep
-     *                                       in its context.
+     * @param  DynaflowStep|null  $sourceStep  Only needed when called from skipInactiveStep,
+     *                                         so that completeWorkflow() has the correct sourceStep
+     *                                         in its context.
      */
     private function activateStep(
         DynaflowInstance $instance,
@@ -871,14 +871,14 @@ class DynaflowEngine
                     // Only reached when skipping an inactive step that leads directly to a final step.
                     // trigger() and transitionTo() handle final steps before calling activateStep().
                     $ctx = new DynaflowContext(
-                        instance:   $instance,
+                        instance: $instance,
                         targetStep: $step,
-                        decision:   $decision,
-                        user:       $user,
+                        decision: $decision,
+                        user: $user,
                         sourceStep: $sourceStep,
-                        execution:  null,
-                        notes:      null,
-                        data:       [],
+                        execution: null,
+                        notes: null,
+                        data: [],
                         isBypassed: false
                     );
                     $this->completeWorkflow($instance, $ctx);
