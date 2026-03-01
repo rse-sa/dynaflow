@@ -37,14 +37,14 @@ class WorkflowMetadataTest extends TestCase
 
         DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
+            'key'         => 'step1',
         ]);
 
         $metadata = [
-            'priority' => 'high',
-            'source' => 'api',
+            'priority'     => 'high',
+            'source'       => 'api',
             'reference_id' => 'REF-123',
-            'tags' => ['urgent', 'legal-review'],
+            'tags'         => ['urgent', 'legal-review'],
         ];
 
         $this->engine->trigger(
@@ -75,22 +75,22 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
-            'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'dynaflow_id'     => $dynaflow->id,
+            'key'             => 'final',
+            'order'           => 2,
+            'is_final'        => true,
             'workflow_status' => 'completed',
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
         $step1->assignees()->create([
             'assignable_type' => $user->getMorphClass(),
-            'assignable_id' => $user->getKey(),
+            'assignable_id'   => $user->getKey(),
         ]);
 
         $capturedMetadata = null;
@@ -102,8 +102,8 @@ class WorkflowMetadataTest extends TestCase
             });
 
         $metadata = [
-            'priority' => 'high',
-            'source' => 'web',
+            'priority'     => 'high',
+            'source'       => 'web',
             'custom_field' => 'custom_value',
         ];
 
@@ -142,22 +142,22 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
-            'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'dynaflow_id'     => $dynaflow->id,
+            'key'             => 'final',
+            'order'           => 2,
+            'is_final'        => true,
             'workflow_status' => 'completed',
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
         $step1->assignees()->create([
             'assignable_type' => $user->getMorphClass(),
-            'assignable_id' => $user->getKey(),
+            'assignable_id'   => $user->getKey(),
         ]);
 
         $capturedViaMeta = null;
@@ -171,8 +171,8 @@ class WorkflowMetadataTest extends TestCase
             });
 
         $metadata = [
-            'priority' => 'urgent',
-            'source' => 'api',
+            'priority'     => 'urgent',
+            'source'       => 'api',
             'reference_id' => 'REF-456',
         ];
 
@@ -210,22 +210,22 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
-            'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'dynaflow_id'     => $dynaflow->id,
+            'key'             => 'final',
+            'order'           => 2,
+            'is_final'        => true,
             'workflow_status' => 'completed',
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
         $step1->assignees()->create([
             'assignable_type' => $user->getMorphClass(),
-            'assignable_id' => $user->getKey(),
+            'assignable_id'   => $user->getKey(),
         ]);
 
         $capturedValue = null;
@@ -269,22 +269,22 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
-            'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'dynaflow_id'     => $dynaflow->id,
+            'key'             => 'final',
+            'order'           => 2,
+            'is_final'        => true,
             'workflow_status' => 'completed',
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
         $step1->assignees()->create([
             'assignable_type' => $user->getMorphClass(),
-            'assignable_id' => $user->getKey(),
+            'assignable_id'   => $user->getKey(),
         ]);
 
         $capturedMetadata = null;
@@ -329,27 +329,27 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
-            'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'dynaflow_id'     => $dynaflow->id,
+            'key'             => 'final',
+            'order'           => 2,
+            'is_final'        => true,
             'workflow_status' => 'completed',
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
         $step1->assignees()->create([
             'assignable_type' => $user->getMorphClass(),
-            'assignable_id' => $user->getKey(),
+            'assignable_id'   => $user->getKey(),
         ]);
 
-        $capturedModel = null;
+        $capturedModel    = null;
         $capturedMetadata = null;
-        $capturedUser = null;
+        $capturedUser     = null;
 
         DynaflowFacade::forWorkflow($model->getMorphClass(), 'update')
             ->whenCompleted()
@@ -358,9 +358,9 @@ class WorkflowMetadataTest extends TestCase
                 array $metadata,
                 $user
             ) use (&$capturedModel, &$capturedMetadata, &$capturedUser) {
-                $capturedModel = $model;
+                $capturedModel    = $model;
                 $capturedMetadata = $metadata;
-                $capturedUser = $user;
+                $capturedUser     = $user;
             });
 
         $metadata = ['priority' => 'high'];
@@ -400,15 +400,15 @@ class WorkflowMetadataTest extends TestCase
 
         // Add exception for this user
         \RSE\DynaFlow\Models\DynaflowException::create([
-            'dynaflow_id' => $dynaflow->id,
+            'dynaflow_id'        => $dynaflow->id,
             'exceptionable_type' => $user->getMorphClass(),
-            'exceptionable_id' => $user->getKey(),
+            'exceptionable_id'   => $user->getKey(),
         ]);
 
         DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'is_final' => true,
+            'key'         => 'final',
+            'is_final'    => true,
         ]);
 
         $capturedMetadata = null;
@@ -450,24 +450,24 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'key'         => 'final',
+            'order'       => 2,
+            'is_final'    => true,
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
 
         // Add exception for this user
         \RSE\DynaFlow\Models\DynaflowException::create([
-            'dynaflow_id' => $dynaflow->id,
+            'dynaflow_id'        => $dynaflow->id,
             'exceptionable_type' => $user->getMorphClass(),
-            'exceptionable_id' => $user->getKey(),
+            'exceptionable_id'   => $user->getKey(),
         ]);
 
         $capturedMetadata = null;
@@ -505,24 +505,24 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'key'         => 'final',
+            'order'       => 2,
+            'is_final'    => true,
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
 
         // Add exception for this user
         \RSE\DynaFlow\Models\DynaflowException::create([
-            'dynaflow_id' => $dynaflow->id,
+            'dynaflow_id'        => $dynaflow->id,
             'exceptionable_type' => $user->getMorphClass(),
-            'exceptionable_id' => $user->getKey(),
+            'exceptionable_id'   => $user->getKey(),
         ]);
 
         $capturedMetadata = null;
@@ -560,38 +560,38 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $step2 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step2',
-            'order' => 2,
+            'key'         => 'step2',
+            'order'       => 2,
             // NOT final - so afterTransitionTo hook will be called
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 3,
-            'is_final' => true,
+            'key'         => 'final',
+            'order'       => 3,
+            'is_final'    => true,
         ]);
 
         $step1->allowedTransitions()->attach($step2->id);
         $step2->allowedTransitions()->attach($finalStep->id);
         $step1->assignees()->create([
             'assignable_type' => $user->getMorphClass(),
-            'assignable_id' => $user->getKey(),
+            'assignable_id'   => $user->getKey(),
         ]);
 
-        $hookWasCalled = false;
+        $hookWasCalled    = false;
         $capturedMetadata = null;
 
         // Get hook manager and register directly
         $hookManager = app(\RSE\DynaFlow\DynaflowHookManager::class);
         $hookManager->afterTransitionTo('*', function ($ctx) use (&$hookWasCalled, &$capturedMetadata) {
-            $hookWasCalled = true;
+            $hookWasCalled    = true;
             $capturedMetadata = $ctx->meta('priority');
         });
 
@@ -634,22 +634,22 @@ class WorkflowMetadataTest extends TestCase
 
         $step1 = DynaflowStep::factory()->create([
             'dynaflow_id' => $dynaflow->id,
-            'key' => 'step1',
-            'order' => 1,
+            'key'         => 'step1',
+            'order'       => 1,
         ]);
 
         $finalStep = DynaflowStep::factory()->create([
-            'dynaflow_id' => $dynaflow->id,
-            'key' => 'final',
-            'order' => 2,
-            'is_final' => true,
+            'dynaflow_id'     => $dynaflow->id,
+            'key'             => 'final',
+            'order'           => 2,
+            'is_final'        => true,
             'workflow_status' => 'completed',
         ]);
 
         $step1->allowedTransitions()->attach($finalStep->id);
         $step1->assignees()->create([
             'assignable_type' => $user->getMorphClass(),
-            'assignable_id' => $user->getKey(),
+            'assignable_id'   => $user->getKey(),
         ]);
 
         $capturedMetadata = null;
@@ -662,15 +662,15 @@ class WorkflowMetadataTest extends TestCase
 
         $complexMetadata = [
             'priority' => 'high',
-            'tags' => ['urgent', 'legal', 'executive'],
-            'details' => [
+            'tags'     => ['urgent', 'legal', 'executive'],
+            'details'  => [
                 'department' => 'finance',
-                'region' => 'emea',
-                'amount' => 50000,
+                'region'     => 'emea',
+                'amount'     => 50000,
             ],
             'flags' => [
                 'requires_approval' => true,
-                'automatic' => false,
+                'automatic'         => false,
             ],
         ];
 

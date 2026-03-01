@@ -10,7 +10,7 @@ class DynaflowContext
 {
     public function __construct(
         public DynaflowInstance $instance,
-        public DynaflowStep $targetStep,
+        public ?DynaflowStep $targetStep,
         public string $decision,
         public mixed $user,
         public ?DynaflowStep $sourceStep = null,
@@ -58,7 +58,7 @@ class DynaflowContext
      */
     public function isCompleted(): bool
     {
-        return $this->targetStep->is_final;
+        return $this->targetStep?->is_final ?? false;
     }
 
     /**

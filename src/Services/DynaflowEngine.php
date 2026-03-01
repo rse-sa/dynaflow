@@ -24,6 +24,14 @@ use RSE\DynaFlow\Support\DynaflowContext;
 
 class DynaflowEngine
 {
+    /**
+     * Tracks (instance_id:step_id) pairs currently being activated.
+     * Used by activateStep() to detect and throw on recursive re-entry.
+     *
+     * @var array<string, bool>
+     */
+    protected array $activatingSteps = [];
+
     public function __construct(
         protected DynaflowValidator $validator,
         protected DynaflowHookManager $hookManager,
@@ -34,14 +42,6 @@ class DynaflowEngine
         $this->autoStepExecutor ??= app(AutoStepExecutor::class);
         $this->logger ??= app(DynaflowLogger::class);
     }
-
-    /**
-     * Tracks (instance_id:step_id) pairs currently being activated.
-     * Used by activateStep() to detect and throw on recursive re-entry.
-     *
-     * @var array<string, bool>
-     */
-    protected array $activatingSteps = [];
 
     /**
      * @throws \Throwable
@@ -693,20 +693,22 @@ class DynaflowEngine
             // Calculate duration
             $durationSeconds = $this->calculateDuration($instance, $ctx->sourceStep);
 
-            // Create execution record for audit
-            $execution = DynaflowStepExecution::create([
-                'dynaflow_instance_id' => $instance->id,
-                'dynaflow_step_id'     => $ctx->sourceStep->id,
-                'executed_by_type'     => $ctx->user->getMorphClass(),
-                'executed_by_id'       => $ctx->user->getKey(),
-                'decision'             => $ctx->decision,
-                'note'                 => $ctx->notes,
-                'duration'             => (int) ($durationSeconds / 60),
-                'execution_started_at' => $instance->step_started_at,
-                'executed_at'          => now(),
-            ]);
+            // Create execution record for audit (only if there's a source step)
+            if ($ctx->sourceStep) {
+                $execution = DynaflowStepExecution::create([
+                    'dynaflow_instance_id' => $instance->id,
+                    'dynaflow_step_id'     => $ctx->sourceStep->id,
+                    'executed_by_type'     => $ctx->user->getMorphClass(),
+                    'executed_by_id'       => $ctx->user->getKey(),
+                    'decision'             => $ctx->decision,
+                    'note'                 => $ctx->notes,
+                    'duration'             => (int) ($durationSeconds / 60),
+                    'execution_started_at' => $instance->step_started_at,
+                    'executed_at'          => now(),
+                ]);
 
-            $ctx->execution = $execution;
+                $ctx->execution = $execution;
+            }
 
             // Update instance
             $status = $context['status'] ?? $ctx->decision;
@@ -794,11 +796,11 @@ class DynaflowEngine
         $transitions = $skippedStep->allowedTransitions()->get();
 
         if ($transitions->isEmpty()) {
-            throw new Exception("Cannot skip inactive step '{$skippedStep->key}': it has no outgoing transitions");
+            throw new Exception("Cannot skip inactive step '" . $skippedStep->key . "': it has no outgoing transitions");
         }
 
         if ($transitions->count() > 1) {
-            throw new Exception("Cannot skip inactive step '{$skippedStep->key}': multiple outgoing transitions are ambiguous — ensure inactive steps have exactly one transition");
+            throw new Exception("Cannot skip inactive step '" . $skippedStep->key . "': multiple outgoing transitions are ambiguous — ensure inactive steps have exactly one transition");
         }
 
         $nextStep = $transitions->first();
@@ -845,6 +847,8 @@ class DynaflowEngine
      * @param  DynaflowStep|null  $sourceStep  Only needed when called from skipInactiveStep,
      *                                         so that completeWorkflow() has the correct sourceStep
      *                                         in its context.
+     *
+     * @throws \Exception
      */
     private function activateStep(
         DynaflowInstance $instance,
