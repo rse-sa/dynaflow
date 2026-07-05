@@ -98,7 +98,7 @@ class DynaflowEngine
             if ($model && $model->exists) {
                 $duplicateInstance = $this->validator->getActiveDuplicateInstance($workflow, $model);
 
-                $duplicateInstance?->update(['status' => DynaflowStatus::CANCELLED->value]);
+                $duplicateInstance?->update(['status' => DynaflowStatus::CANCELLED->value, 'cancelled_at' => now()]);
             }
 
             $instanceModel = dynaflowInstanceModel();
@@ -159,7 +159,7 @@ class DynaflowEngine
             // Cancel duplicates
             if ($model && $model->exists) {
                 $this->validator->getActiveDuplicateInstance($workflow, $model)
-                    ?->update(['status' => DynaflowStatus::CANCELLED->value]);
+                    ?->update(['status' => DynaflowStatus::CANCELLED->value, 'cancelled_at' => now()]);
             }
 
             // Get final step
@@ -260,7 +260,7 @@ class DynaflowEngine
             // Cancel duplicates
             if ($model && $model->exists) {
                 $this->validator->getActiveDuplicateInstance($workflow, $model)
-                    ?->update(['status' => DynaflowStatus::CANCELLED->value]);
+                    ?->update(['status' => DynaflowStatus::CANCELLED->value, 'cancelled_at' => now()]);
             }
 
             // Build linear path
@@ -411,7 +411,7 @@ class DynaflowEngine
             // Cancel duplicates
             if ($model && $model->exists) {
                 $this->validator->getActiveDuplicateInstance($workflow, $model)
-                    ?->update(['status' => DynaflowStatus::CANCELLED->value]);
+                    ?->update(['status' => DynaflowStatus::CANCELLED->value, 'cancelled_at' => now()]);
             }
 
             // Create instance
