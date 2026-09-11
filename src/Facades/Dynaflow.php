@@ -13,6 +13,11 @@ use RSE\DynaFlow\Contracts\ActionHandler;
  *
  * --- Non-registration methods ---
  * @method static bool willBypass(string $topic, string $action, mixed $user)
+ * @method static void registerQueryScope(class-string<\RSE\DynaFlow\Contracts\WorkflowQueryScope> $class)
+ * @method static array getQueryScopes()
+ * @method static void withoutResolveFallback()
+ * @method static bool resolveFallbackDisabled()
+ * @method static bool hasResolverFor(string $topic, string $action)
  * @method static void registerAction(string $key, ActionHandler|Closure|string $handler)
  * @method static ActionHandler|null getActionHandler(string $key)
  * @method static void registerScript(string $key, Closure $script)

@@ -73,6 +73,10 @@ class DynaflowHookManager
 
     protected array $workflowResolvers = [];
 
+    protected array $queryScopes = [];
+
+    protected bool $resolveFallbackDisabled = false;
+
     /**
      * Clear all registered hooks and resolvers. Useful for test isolation.
      */
@@ -92,6 +96,58 @@ class DynaflowHookManager
         $this->scripts                 = [];
         $this->aiResolvers             = [];
         $this->workflowResolvers       = [];
+        $this->queryScopes             = [];
+        $this->resolveFallbackDisabled = false;
+    }
+
+    /**
+     * Register a WorkflowQueryScope class/binding name, applied by every
+     * dynaflow model's `applyRegisteredScopes()` local scope.
+     *
+     * @param  class-string<\RSE\DynaFlow\Contracts\WorkflowQueryScope>|string  $class
+     */
+    public function registerQueryScope(string $class): void
+    {
+        $this->queryScopes[] = $class;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    public function getQueryScopes(): array
+    {
+        return $this->queryScopes;
+    }
+
+    /**
+     * Disable the "grab the first active workflow" fallback in
+     * DynaflowEngine::resolveWorkflow() for topics/actions that have a
+     * registered resolver. A registered resolver returning null becomes
+     * authoritative — "no workflow" — instead of falling back to the DB.
+     */
+    public function withoutResolveFallback(): void
+    {
+        $this->resolveFallbackDisabled = true;
+    }
+
+    public function resolveFallbackDisabled(): bool
+    {
+        return $this->resolveFallbackDisabled;
+    }
+
+    /**
+     * Check whether a resolver is registered for this topic/action
+     * (exact, topic-wildcard, action-wildcard, or global).
+     */
+    public function hasResolverFor(string $topic, string $action): bool
+    {
+        foreach ($this->getResolverKeys($topic, $action) as $key) {
+            if (isset($this->workflowResolvers[$key])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // -------------------------------------------------------------------------

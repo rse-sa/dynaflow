@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Arr;
+use RSE\DynaFlow\Concerns\HasRegisteredQueryScopes;
 use RSE\DynaFlow\Database\Factories\DynaflowFactory;
 use RSE\DynaFlow\Enums\BypassMode;
 use Spatie\Translatable\HasTranslations;
@@ -20,6 +21,7 @@ use Spatie\Translatable\HasTranslations;
 class Dynaflow extends Model
 {
     use HasFactory;
+    use HasRegisteredQueryScopes;
     use HasTranslations;
 
     protected $fillable = [

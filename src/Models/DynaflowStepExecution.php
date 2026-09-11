@@ -7,12 +7,14 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use RSE\DynaFlow\Concerns\HasRegisteredQueryScopes;
 use RSE\DynaFlow\Database\Factories\DynaflowStepExecutionFactory;
 
 #[UseFactory(DynaflowStepExecutionFactory::class)]
 class DynaflowStepExecution extends Model
 {
     use HasFactory;
+    use HasRegisteredQueryScopes;
 
     protected $fillable = [
         'dynaflow_instance_id',

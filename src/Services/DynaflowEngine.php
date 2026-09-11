@@ -787,7 +787,7 @@ class DynaflowEngine
      *
      * @throws Exception
      */
-    private function skipInactiveStep(
+    protected function skipInactiveStep(
         DynaflowInstance $instance,
         DynaflowStep $skippedStep,
         mixed $user,
@@ -850,7 +850,7 @@ class DynaflowEngine
      *
      * @throws \Exception
      */
-    private function activateStep(
+    protected function activateStep(
         DynaflowInstance $instance,
         DynaflowStep $step,
         mixed $user,
@@ -907,7 +907,7 @@ class DynaflowEngine
      * Resolve which Dynaflow to run for the given topic/action.
      * First checks registered resolver callbacks, then falls back to the DB query.
      */
-    private function resolveWorkflow(string $topic, string $action, ?Model $model, array $data, mixed $user): ?Dynaflow
+    protected function resolveWorkflow(string $topic, string $action, ?Model $model, array $data, mixed $user): ?Dynaflow
     {
         $resolved = $this->hookManager->resolveWorkflow($topic, $action, $model, $data, $user);
 

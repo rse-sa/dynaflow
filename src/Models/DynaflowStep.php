@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use RSE\DynaFlow\Concerns\HasRegisteredQueryScopes;
 use RSE\DynaFlow\Database\Factories\DynaflowStepFactory;
 use Spatie\Translatable\HasTranslations;
 
@@ -19,6 +20,7 @@ use Spatie\Translatable\HasTranslations;
 class DynaflowStep extends Model
 {
     use HasFactory;
+    use HasRegisteredQueryScopes;
     use HasTranslations;
 
     /**

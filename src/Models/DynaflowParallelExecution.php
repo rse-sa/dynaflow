@@ -4,6 +4,7 @@ namespace RSE\DynaFlow\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use RSE\DynaFlow\Concerns\HasRegisteredQueryScopes;
 
 /**
  * Tracks parallel execution branches within a workflow instance.
@@ -23,6 +24,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class DynaflowParallelExecution extends Model
 {
+    use HasRegisteredQueryScopes;
+
     protected $table = 'dynaflow_parallel_executions';
 
     protected $fillable = [

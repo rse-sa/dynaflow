@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use RSE\DynaFlow\Concerns\HasRegisteredQueryScopes;
 use RSE\DynaFlow\Database\Factories\DynaflowInstanceFactory;
 use RSE\DynaFlow\Enums\DynaflowStatus;
 
@@ -20,6 +21,7 @@ use RSE\DynaFlow\Enums\DynaflowStatus;
 class DynaflowInstance extends Model
 {
     use HasFactory;
+    use HasRegisteredQueryScopes;
 
     protected $fillable = [
         'dynaflow_id',

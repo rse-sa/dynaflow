@@ -6,10 +6,13 @@ use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use RSE\DynaFlow\Concerns\HasRegisteredQueryScopes;
 
 #[UseFactory(DynaflowStepAssigneeFactory::class)]
 class DynaflowStepAssignee extends Model
 {
+    use HasRegisteredQueryScopes;
+
     protected $fillable = [
         'dynaflow_step_id',
         'assignable_type',

@@ -5,11 +5,14 @@ namespace RSE\DynaFlow\Models;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use RSE\DynaFlow\Concerns\HasRegisteredQueryScopes;
 use RSE\DynaFlow\Database\Factories\DynaflowDataFactory;
 
 #[UseFactory(DynaflowDataFactory::class)]
 class DynaflowData extends Model
 {
+    use HasRegisteredQueryScopes;
+
     protected $table = 'dynaflow_data';
 
     protected $fillable = [
