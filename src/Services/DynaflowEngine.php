@@ -98,7 +98,15 @@ class DynaflowEngine
             if ($model && $model->exists) {
                 $duplicateInstance = $this->validator->getActiveDuplicateInstance($workflow, $model);
 
-                $duplicateInstance?->update(['status' => DynaflowStatus::CANCELLED->value, 'cancelled_at' => now()]);
+                if ($duplicateInstance) {
+                    $this->cancelWorkflow(
+                        instance: $duplicateInstance,
+                        user: $user,
+                        decision: 'cancelled_on_duplicate',
+                        notes: 'Superseded by new instance',
+                        context: ['status' => DynaflowStatus::CANCELLED->value],
+                    );
+                }
             }
 
             $instanceModel = dynaflowInstanceModel();
@@ -915,6 +923,13 @@ class DynaflowEngine
             return $resolved;
         }
 
+        // A registered resolver's null is authoritative when the app opted out
+        // of the fallback — otherwise a broad definition (e.g. no matcher_conditions)
+        // would catch documents a stricter resolver deliberately routed around.
+        if ($this->hookManager->resolveFallbackDisabled() && $this->hookManager->hasResolverFor($topic, $action)) {
+            return null;
+        }
+
         return Dynaflow::where('topic', $topic)
             ->where('action', $action)
             ->where('active', true)
@@ -1007,7 +1022,9 @@ class DynaflowEngine
                 ->filter();
 
             if ($assignees->isNotEmpty()) {
-                Notification::send($assignees, new DynaflowStepNotification($ctx));
+                DB::afterCommit(function () use ($assignees, $ctx) {
+                    Notification::send($assignees, new DynaflowStepNotification($ctx));
+                });
             }
         }
     }
