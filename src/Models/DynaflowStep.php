@@ -46,6 +46,8 @@ class DynaflowStep extends Model
         'auto_close',
         'active',
         'workflow_status',
+        'completion_policy',
+        'min_approvals',
         'metadata',
     ];
 
@@ -53,6 +55,7 @@ class DynaflowStep extends Model
         'is_final'      => 'boolean',
         'auto_close'    => 'boolean',
         'active'        => 'boolean',
+        'min_approvals' => 'integer',
         'metadata'      => 'array',
         'action_config' => 'array',
     ];

@@ -635,6 +635,14 @@ class DynaflowEngine
             // Send notifications if enabled
             $this->sendStepNotifications($ctx);
 
+            // completion_policy gate: a stateful step configured for 'all' or
+            // 'quorum:N' holds at the source step until enough assignees have
+            // acted. The execution row above already recorded this actor's
+            // decision; only the advance is withheld.
+            if (! $this->stepCompletionSatisfied($ctx->sourceStep, $instance)) {
+                return $ctx;
+            }
+
             // Update instance state
             $instance->update([
                 'current_step_id' => $targetStep->id,
@@ -659,6 +667,34 @@ class DynaflowEngine
 
             return $ctx;
         });
+    }
+
+    /**
+     * Whether a stateful step's completion_policy is satisfied and the
+     * instance may advance past it. 'any' (default) is satisfied by the
+     * first recorded approval; 'all' requires every assignee; 'quorum:N'
+     * requires N.
+     */
+    protected function stepCompletionSatisfied(DynaflowStep $sourceStep, DynaflowInstance $instance): bool
+    {
+        $policy = $sourceStep->completion_policy ?? 'any';
+
+        if ($policy === 'any') {
+            return true;
+        }
+
+        $required = match (true) {
+            $policy === 'all' => $sourceStep->assignees()->count(),
+            str_starts_with($policy, 'quorum:') => (int) substr($policy, 7),
+            default => 1,
+        };
+
+        $approvals = DynaflowStepExecution::where('dynaflow_instance_id', $instance->id)
+            ->where('dynaflow_step_id', $sourceStep->id)
+            ->whereIn('decision', ['approved', 'auto_approved'])
+            ->count();
+
+        return $approvals >= $required;
     }
 
     /**
