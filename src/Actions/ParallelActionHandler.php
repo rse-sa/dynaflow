@@ -68,7 +68,8 @@ class ParallelActionHandler implements ActionHandler
             ]);
 
             // Dispatch job to execute branch (async)
-            ExecuteAutoStepJob::dispatch($instance->fresh(), $branchStep, $ctx->user);
+            ExecuteAutoStepJob::dispatch($instance->fresh(), $branchStep, $ctx->user, $instance->tenantContext())
+                ->afterCommit();
         }
 
         return ActionResult::forked([

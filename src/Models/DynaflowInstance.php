@@ -76,6 +76,17 @@ class DynaflowInstance extends Model
         return $this->hasOne(dynaflowDataModel());
     }
 
+    /**
+     * Opaque tenant identifier carried by queued jobs so a consumer app's
+     * JobTenantResolver can wrap job execution in the right context.
+     * Dynaflow has no concept of a tenant — this is a hook, not a column.
+     * Consumer apps override this in their model subclass.
+     */
+    public function tenantContext(): mixed
+    {
+        return null;
+    }
+
     public function scopePending(Builder $builder): Builder
     {
         return $builder->where('status', DynaflowStatus::PENDING->value);

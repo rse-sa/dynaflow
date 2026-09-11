@@ -8,6 +8,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use RSE\DynaFlow\Contracts\JobTenantResolver;
 use RSE\DynaFlow\Models\DynaflowInstance;
 use RSE\DynaFlow\Models\DynaflowStep;
 use RSE\DynaFlow\Services\AutoStepExecutor;
@@ -30,7 +31,8 @@ class ResumeDelayedStepJob implements ShouldQueue
     public function __construct(
         public DynaflowInstance $instance,
         public DynaflowStep $step,
-        public mixed $user = null
+        public mixed $user = null,
+        public mixed $tenantContext = null
     ) {}
 
     /**
@@ -45,6 +47,14 @@ class ResumeDelayedStepJob implements ShouldQueue
      * Execute the job.
      */
     public function handle(AutoStepExecutor $executor): void
+    {
+        app(JobTenantResolver::class)->runInTenantContext(
+            $this->tenantContext,
+            fn () => $this->run($executor)
+        );
+    }
+
+    protected function run(AutoStepExecutor $executor): void
     {
         // Reload fresh instance
         $instance = $this->instance->fresh();
@@ -91,7 +101,8 @@ class ResumeDelayedStepJob implements ShouldQueue
 
         // If next step is also auto-executable, continue the chain
         if ($nextStep->isAutoExecutable()) {
-            ExecuteAutoStepJob::dispatch($instance->fresh(), $nextStep, $this->user);
+            ExecuteAutoStepJob::dispatch($instance->fresh(), $nextStep, $this->user, $this->tenantContext)
+                ->afterCommit();
         }
 
         Log::info('ResumeDelayedStepJob completed', [

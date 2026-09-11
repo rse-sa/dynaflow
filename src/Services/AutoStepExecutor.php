@@ -211,8 +211,9 @@ class AutoStepExecutor
 
         if ($resumeAt) {
             // Schedule job to resume after delay
-            ResumeDelayedStepJob::dispatch($instance, $step, $user)
-                ->delay(now()->parse($resumeAt));
+            ResumeDelayedStepJob::dispatch($instance, $step, $user, $instance->tenantContext())
+                ->delay(now()->parse($resumeAt))
+                ->afterCommit();
 
             Log::info("Scheduled workflow resume for instance {$instance->id} at {$resumeAt}");
         }
@@ -303,7 +304,8 @@ class AutoStepExecutor
         // Check if next step is also auto-executable
         if ($chainExecution && $nextStep->isAutoExecutable()) {
             // Dispatch job for next step to avoid deep recursion
-            ExecuteAutoStepJob::dispatch($instance->fresh(), $nextStep, $user);
+            ExecuteAutoStepJob::dispatch($instance->fresh(), $nextStep, $user, $instance->tenantContext())
+                ->afterCommit();
 
             return ActionResult::success([
                 'chained_to'  => $nextStep->key,

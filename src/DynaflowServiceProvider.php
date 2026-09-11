@@ -13,6 +13,7 @@ use RSE\DynaFlow\Actions\JoinActionHandler;
 use RSE\DynaFlow\Actions\ParallelActionHandler;
 use RSE\DynaFlow\Actions\ScriptActionHandler;
 use RSE\DynaFlow\Actions\SubWorkflowActionHandler;
+use RSE\DynaFlow\Contracts\JobTenantResolver;
 use RSE\DynaFlow\Services\ActionHandlerRegistry;
 use RSE\DynaFlow\Services\AutoStepExecutor;
 use RSE\DynaFlow\Services\CallbackInvoker;
@@ -33,12 +34,24 @@ class DynaflowServiceProvider extends ServiceProvider
         $this->app->singleton(DynaflowLogger::class);
         $this->app->singleton(DynaflowHookManager::class);
         $this->app->singleton(DynaflowValidator::class);
-        $this->app->singleton(DynaflowEngine::class);
+        // Scoped, not singleton: $activatingSteps is a per-request re-entrancy
+        // guard. A singleton would leak that guard across requests under
+        // Octane, causing false loop-detection errors or blocked activations.
+        $this->app->scoped(DynaflowEngine::class);
         $this->app->singleton(DynaflowStepVisualizer::class);
         $this->app->singleton(ActionHandlerRegistry::class);
         $this->app->singleton(PlaceholderResolver::class);
         $this->app->singleton(ExpressionEvaluator::class);
         $this->app->singleton(AutoStepExecutor::class);
+
+        $this->app->singleton(JobTenantResolver::class, function () {
+            return new class implements JobTenantResolver {
+                public function runInTenantContext(mixed $tenantContext, callable $work): mixed
+                {
+                    return $work();
+                }
+            };
+        });
 
         $this->app->singleton('dynaflow.manager', function ($app) {
             return $app->make(DynaflowHookManager::class);
