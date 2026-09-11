@@ -72,10 +72,27 @@ class DynaflowValidator
             }
         }
 
-        // 3. Check database assignees
-        $assignees = $this->hookManager->hasAssigneeResolver()
-            ? $this->hookManager->resolveAssignees($step, $user, $instance)
-            : $step->assignees->pluck('assignable_id')->toArray();
+        // 3. Check database assignees. When an $instance is passed, narrow the
+        // pool to rows valid for THAT instance (`scopeForInstance` — see
+        // {@see DynaflowStepAssignee}): dynamically-resolved rows tagged with
+        // this instance's id + classic static rows with a NULL instance id.
+        // Without this narrowing, the moment ONE instance's dynamic resolver
+        // writes an approver to `dynaflow_step_assignees`, that approver is
+        // silently authorized for every OTHER instance visiting the same step
+        // — cross-instance leak. When $instance is null the query stays
+        // unscoped, matching the pre-instance-scope behaviour every caller
+        // still on the 2-arg signature depends on.
+        if ($this->hookManager->hasAssigneeResolver()) {
+            $assignees = $this->hookManager->resolveAssignees($step, $user, $instance);
+        } else {
+            $query = $step->assignees();
+
+            if ($instance !== null) {
+                $query->forInstance($instance->getKey());
+            }
+
+            $assignees = $query->pluck('assignable_id')->toArray();
+        }
 
         if (empty($assignees)) {
             return true;
